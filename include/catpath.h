@@ -1,0 +1,21 @@
+#ifndef _CATPATH_HEADER
+
+#define _CATPATH_HEADER
+
+#define CATPATH_NOT_FOUND	-1
+#define CATPATH_FOREIGNKEY	  0
+#define CATPATH_TABLE	  1
+#define CATPATH_TABLE_COLUMN	  2
+#define CATPATH_TABLE_FOREIGNKEY	  3
+#define CATPATH_TABLE_FOREIGNKEY_INDEX	  4
+#define CATPATH_TABLE_FOREIGNKEY_TABLE	  5
+#define CATPATH_TABLE_INDEX	  6
+#define CATPATH_TABLE_INDEX_INDEXCOLUMN	  7
+#define CATPATH_TABLE_INDEX_INDEXCOLUMN_COLUMN	  8
+
+#define CATPATH_COUNT	9
+
+extern int   catpath_search(char *w);
+extern char *catpath_keyword(int code);
+
+#endif

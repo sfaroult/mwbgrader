@@ -1,0 +1,922 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+#include "grad.h"
+#include "dbop.h"
+#include "debug.h"
+
+
+#define LINE_LEN   250
+
+// Rules for grading
+#define NO_RULE       -1
+#define ASSIGN         0
+#define MULT_ONCE      1
+#define MULT_EACH      2
+#define SUB_ONCE       4
+#define SUB_EACH       8
+#define ADD_ONCE      16
+#define ADD_EACH      32
+#define AT_LEAST      64
+#define AT_MOST      128
+
+#define _trim(s)     {int __len; if (s) {__len = strlen(s);\
+                      while (__len && isspace(s[__len-1])){__len--;}\
+                      s[__len] = '\0';}}
+#define _skip_spaces(s) {if (s) {while (isspace(*s)) {s++;}}}
+
+typedef struct overview {
+               int             tabcnt;
+               int             datacnt;
+               RELATIONSHIP_T *rel;
+               NAME_ITEM_T    *selfref;
+             } OVERVIEW_T;
+
+typedef struct {
+          short check_code;
+          char *description;
+          char *sql;
+          short rule;
+          float threshold;
+          float val;
+          short next; // "Pointer" - index of the next control to run
+         } GRADING_T;
+
+extern int levenshtein(char *s1, char *s2);
+
+// Initialized structure
+// If no grading.conf file apply default.
+// grading.conf can change the rules
+
+static short     G_chain_start = -1;
+// Default control sequence
+static short     G_grading_seq[GRAD_COUNT] =
+                  {GRAD_START_GRADE,
+                   GRAD_NO_PK,
+                   GRAD_EVERYTHING_NULLABLE,
+                   GRAD_NO_UNIQUENESS,
+                   GRAD_ISOLATED_TABLES,
+                   GRAD_CIRCULAR_FK,
+                   GRAD_MULTIPLE_LEGS,
+                   GRAD_ONE_ONE_RELATIONSHIP,
+                   GRAD_TOO_MANY_FK_TO_SAME,
+                   GRAD_SINGLE_COL_TABLE,
+                   GRAD_ULTRA_WIDE,
+                   GRAD_USELESS_AUTOINC,
+                   GRAD_SAME_DATATYPE_FOR_ALL_COLS,
+                   GRAD_SAME_VARCHAR_LENGTH,
+                   GRAD_PERCENT_SINGLE_COL_IDX,
+                   GRAD_REDUNDANT_INDEXES,
+                   GRAD_PERCENT_COMMENTED_TABLES,
+                   GRAD_PERCENT_COMMENTED_COLUMNS};
+
+static GRADING_T G_grading[] =
+            {{GRAD_EVERYTHING_NULLABLE,
+              "No mandatory column other than possibly a system-generated one",
+              "select t.name"
+              " from tabTable t"
+              "      join tabColumn c"
+              "        on c.tabid=t.id"
+              " where c.autoinc='0'"
+              " group by t.name"
+              " having max(c.IsNotNull)='0'"
+              " order by 1",
+              SUB_EACH,
+              0,
+              5.0,
+              -1},
+             {GRAD_ISOLATED_TABLES,
+              "Tables not involved into any FK relationship",
+              "select t.name"
+              " from tabTable t"
+              "  left outer join"
+              "  (select distinct"
+              "     case x.n"
+              "       when 1 then fk.tabid"
+              "       when 2 then fk.reftabid"
+              "     end as tabid"
+              " from tabForeignKey fk"
+              "   cross join (select 1 as n"
+              "    union select 2) x) y"
+              " on y.tabid=t.id"
+              " where y.tabid is null"
+              " order by 1",
+              SUB_EACH,
+              0,
+              3.0,
+              -1},
+             {GRAD_TOO_MANY_FK_TO_SAME,
+              "Tables with more than two FKs to the same table",
+              "select t1.name as TabName,"
+              "  t2.name as RefTabName,"
+              "  x.cnt as fk_count"
+              " from (select tabid,reftabid,count(*) cnt"
+              "  from tabForeignKey"
+              "  group by tabid,reftabid"
+              " having count(*)>2) x"
+              " join tabTable t1"
+              "  on t1.id=x.tabid"
+              " join tabTable t2"
+              "  on t2.id=x.reftabid"
+              " order by 1",
+              SUB_EACH,
+              0,
+              1.5,
+              -1},
+             {GRAD_SINGLE_COL_TABLE,
+              "Tables with a single column",
+              "select t.name"
+              " from tabTable t"
+              "  join tabColumn c"
+              "  on c.tabid=t.id"
+              " group by t.name"
+              " having count(c.id)=1"
+              " order by 1",
+              SUB_EACH,
+              0,
+              3.5,
+              -1},
+             {GRAD_PERCENT_SINGLE_COL_IDX,
+              "Single column indexes as a percentage",
+              // Percentage of single-column indexes
+              "select round(100*cast(sum(single_col_idx) as float)"
+              " / count(*)) as pct_one_col"
+              " from (select case max(seq)"
+              "   when 1 then 1"
+              "   else 0"
+              " end as single_col_idx,"
+              " idxid"
+              " from tabIndexCol"
+              " group by idxid) x",
+              SUB_ONCE | AT_MOST,
+              99,
+              5.0,
+              -1},
+             {GRAD_SAME_VARCHAR_LENGTH,
+              "All varchars have a default 'just in case' value",
+              // All varchar columns have the same (default or "safe") length
+              "select 'Length:' || cast(max(collength) as char) collength"
+              " from tabColumn"
+              " where datatype='varchar'"
+              " group by datatype"
+              " having count(distinct collength) = 1",
+              SUB_ONCE,
+              0,
+              5.0,
+              -1},
+             {GRAD_SAME_DATATYPE_FOR_ALL_COLS,
+              "Tables where all columns look like default varchar columns",
+              // Tables where all columns have the same varchar datatype
+              // except perhaps an autoincrement column
+              "select t.name as TableName"
+              " from (select tabid,max(datatype) datatype,"
+              "max(collength) collength"
+              " from tabColumn"
+              " where autoinc=0"
+              " group by tabid"
+              " having count(*)>1"
+              " and count(distinct datatype||cast(collength as char))=1) x"
+              " join tabTable t"
+              " on t.id=x.tabid"
+              " where datatype='varchar'"
+              " order by 1",
+              SUB_ONCE,
+              0,
+              3.5,
+              -1},
+             {GRAD_REDUNDANT_INDEXES,
+              "Single-column indexes made useless by a multiple column index",
+              "select t.name||': '||one_col.redundant_idx"
+              "||' redundant with '||i2.name"
+              " from (select i.name redundant_idx,"
+              " i.tabid,i.id as idxid,max(ic.colid) as colid"
+              " from tabIndex i"
+              " join tabIndexCol ic"
+              " on ic.idxid=i.id"
+              " group by i.name,i.tabid,i.id"
+              " having max(ic.seq)=1) one_col"
+              " join tabIndex i2"
+              " on i2.tabid=one_col.tabid"
+              " and i2.id<>one_col.idxid"
+              " join tabIndexCol ic2"
+              " on ic2.idxid=i2.id"
+              " and ic2.colid=one_col.colid"
+              " and ic2.seq=1"
+              " join tabTable t"
+              " on t.id=i2.tabid"
+              " order by 1",
+              SUB_EACH,
+              0,
+              2.0,
+              -1},
+             {GRAD_NO_PK,
+              "Tables without a primary (or unique) key",
+              "select t.name as TableName"
+              " from TabTable t"
+              " left outer join"
+              " (select distinct tabid"
+              "   from tabIndex"
+              "   where isPrimary=1 or isUnique=1) has_pk"
+              " on has_pk.tabid=t.id"
+              " where has_pk.tabid is null"
+              " order by 1",
+              SUB_EACH,
+              0,
+              10.0,
+              -1},
+             {GRAD_ONE_ONE_RELATIONSHIP,
+              "Tables in a one-to-one relationship that"
+              " doesn't look like inheritance",
+              // One-one relationship if all columns in a unique or primary
+              // index also belongs to a (single) fk 
+              "select t1.name"
+              "||' in a one-to-one relationship with '||"
+              " t2.name"
+              " from (select xx.tabid,xx.reftabid"
+              "  from (select i.tabid,fk.reftabid"
+              "  from tabIndex i"
+              "   join tabIndexCol ic"
+              "    on ic.idxid=i.id"
+              "  left outer join tabForeignKey fk"
+              "    on fk.tabid=i.tabid"
+              "   and fk.tabid<>fk.reftabid"
+              "  left outer join tabFkcol fkc"
+              "    on fkc.fkid=fk.id"
+              "   and ic.colid=fkc.colid"
+              " where (i.isPrimary=1 or i.isUnique=1)"
+              " group by i.tabid,fk.reftabid,fk.id,i.id"
+              " having count(ic.colid)=count(fkc.colid)) xx"
+              // Exclude what could reasonably look like inheritance
+              " left outer join"
+              " (select y.reftabid as parent_table,"
+              "   ','||group_concat(y.tabid)||',' as child_tables"
+              " from (select tabid,pkcols,fkcols,fkid,reftabid"
+              "  from (select pk.tabid,count(*) as pkcols,"
+              "   sum(case"
+              "    when fkc.colid is null then 0"
+              "    else 1"
+              "    end) as fkcols,fk.id as fkid,fk.reftabid"
+              " from tabIndex pk"
+              "  join tabIndexCol pkc"
+              "  on pkc.idxid=pk.id"
+              "  left outer join tabForeignKey fk"
+              "  on fk.tabid=pk.tabid"
+              "  and fk.tabid<>fk.reftabid"
+              "  left outer join tabFkcol fkc"
+              "  on fkc.fkid=fk.id"
+              "  and pkc.colid=fkc.colid"
+              " where pk.isPrimary=1"
+              " group by pk.tabid,fk.id,fk.reftabid) x"
+              // All the PK columns are in a single FK
+              " where pkcols=fkcols) y"
+              " group by y.reftabid"
+              " having count(*)>1) zz"
+              " on zz.parent_table=xx.reftabid"
+              " and zz.child_tables like '%,'||xx.tabid||',%'"
+              " where zz.parent_table is null) one2one"
+              " join tabTable t1"
+              " on t1.id=one2one.tabid"
+              " join tabTable t2"
+              " on t2.id=one2one.reftabid"
+              " order by 1",
+              SUB_EACH,
+              0,
+              3.0,
+              -1},
+             {GRAD_NO_UNIQUENESS,
+              "Tables with no other unique columns"
+              " than possibly a system-generated id",
+              // Check that every table has a unique or primary index,
+              // once you have taken off auto increment columns
+              "select t.name as TableName"
+              " from tabTable t"
+              " left outer join"
+              // Tables that have another PK or unique index than an index
+              // on an autoincrement column 
+              " (select distinct i.tabid"
+              "  from tabIndex i"
+              " join (select ic.idxid"     // Indexes that DON'T contain
+              "   from tabIndexCol ic"     // an autoincrement column
+              "    join tabColumn c"
+              "    on c.id=ic.colid"
+              "  group by ic.idxid"
+              "  having max(c.autoInc)='0') x"
+              "  on x.idxid=i.id"
+              " where i.isprimary=1"
+              "  or i.isunique=1) y"
+              " on y.tabid=t.id"
+              " where y.tabid is null"
+              " order by 1",
+              SUB_EACH,
+              0,
+              4.0,
+              -1},
+             {GRAD_PERCENT_COMMENTED_TABLES,
+              "Percentage of tables with comments",
+              "select round(100.0*sum(case comment_len when 0"
+              " then 0 else 1 end)/count(*)) ptc_commented"
+              " from tabTable",
+              SUB_ONCE | AT_LEAST,
+              50,
+              5.0,
+              -1},
+             {GRAD_MULTIPLE_LEGS,
+              "Three-legged (or more) many-to-many relationships",
+              // Multiple legs relationships
+              "select t.name||': '||cast(x.legs as char)||' legs'"
+              " from (select ut.tabid,count(*) as legs"
+              " from (select t.id as tabid"
+              "  from tabTable t"
+              "  left outer join tabForeignKey fk"
+              "   on fk.reftabid=t.id"
+              " where fk.id is null) ut" // Unreferenced tables
+              " join tabForeignKey fk"
+              " on fk.tabid=ut.tabid"
+              " group by ut.tabid"
+              " having count(*)>2) x"
+              " join tabtable t"
+              " on t.id=x.tabid"
+              " order by 1",
+              SUB_EACH,
+              0,
+              2.5,
+              -1},
+             {GRAD_PERCENT_COMMENTED_COLUMNS,
+              "Percentage of columns with comments",
+              "select round(100.0*sum(case comment_len when 0"
+              " then 0 else 1 end)/count(*)) ptc_commented"
+              " from tabColumn",
+              SUB_ONCE | AT_LEAST,
+              10,
+              5.0,
+              -1},
+             {GRAD_CIRCULAR_FK,
+              "Presence of circular foreign keys",
+              // Detection of circular FKs
+              "with q as (select coalesce(name,id) as id,reftabid as tabid"
+              " from tabForeignKey"
+              " where tabid<>reftabid"
+              " union all"
+              " select q.id,fk.reftabid"
+              " from tabForeignKey fk"
+              " join q"
+              " on q.tabid=fk.tabid"
+              " where fk.tabid<>fk.reftabid)"
+              " select id"
+              " from (select *"
+              " from q"
+              " limit 5000) x"
+              " group by id"
+              " having count(*) > 100",
+              SUB_ONCE,
+              0,
+              10.0,
+              -1},
+             {GRAD_START_GRADE,
+              "Initial grade from which the final grade is computed",
+              NULL,
+              ASSIGN,
+              0,
+              100.0,
+              -1},
+             {GRAD_ULTRA_WIDE,
+              "Tables with a number of columns far above other tables",
+              "select t.name||': '||cast(count(c.id) as char)||' columns'"
+              " from tabTable t"
+              " join tabColumn c"
+              " on c.tabid=t.id"
+              " group by t.name"
+              " having count(c.id)>(select 3*sum(cols)/count(tabid)"
+              "  from (select tabid,count(*) as cols"
+              "   from tabColumn"
+              "   group by tabid"
+              "   having count(*)>3))" // Eliminate label tables
+              " order by 1",
+              SUB_EACH,
+              0,
+              1.0,
+              -1},
+             {GRAD_USELESS_AUTOINC,
+              "Unreferenced tables with a system-generated row identifier",
+              // Unreferenced tables with (useless) autoincrement columns
+              "select ut.name"
+              " from (select t.name,t.id as tabid"
+              " from tabTable t"
+              " left outer join tabForeignKey fk"
+              " on fk.reftabid=t.id"
+              " where fk.id is null) ut" // Unreferenced tables
+              " join tabColumn c"
+              " on c.tabid=ut.tabid"
+              " and c.autoinc=1"
+              " order by 1",
+              SUB_EACH,
+              0,
+              0.5,
+              -1}
+             };
+
+static void grading_info(GRADING_T *g) {
+    // For debugging
+    if (g) {
+       printf("--------------\n");
+       printf(" code      = %s (%d)\n",
+              grad_keyword(g->check_code),
+              g->check_code);
+       if (g->description) {
+         printf(" %s\n", g->description);
+       }
+       printf(" %-50.50s...\n", g->sql);
+       printf(" rule      = %hd\n", g->rule);
+       printf(" threshold = %f\n", g->threshold);
+       printf(" val       = %f\n", g->val);
+       printf(" next      = %hd\n", g->next);
+       printf("--------------\n");
+       fflush(stdout);
+    }
+}
+
+static short read_rules(char *str, short *prule, float *pval, int linenum) {
+    short  ret = -1;
+    char  *p = str;
+
+    if (str && prule && pval) {
+      switch(*p) {
+        case '\0':
+             *prule = NO_RULE;
+             *pval = 0;
+             ret = 0;
+             break;
+        case '+':
+        case '-':
+        case '*':
+             *prule = (*p == '+' ? ADD_ONCE :
+                                   (*p == '-' ? SUB_ONCE : MULT_ONCE));
+             if (*(p+1) == *p) {
+               *prule = (2 * (*prule));
+               p++;
+             }
+             p++;
+             if (sscanf(p, "%f", pval) != 1) {
+               fprintf(stderr,
+                       "Missing value in configuration file line %d\n",
+                       linenum);
+             } else {
+               // There should be nothing else on the line
+               ret = 0;
+               while (*p) {
+                 if (!isspace(*p)) {
+                   fprintf(stderr,
+                       "\"%s\" unexpected in configuration file line %d\n",
+                       p,
+                       linenum);
+                   ret = -1;
+                   break;
+                 }
+               }
+             }
+             break;
+       default:
+             fprintf(stderr,
+                     "Invalid rule \"%s\" in configuration file line %d\n",
+                     p,
+                     linenum);
+             break;
+     }
+   }
+   return ret;
+}
+
+static int find_index(int check_code) {
+    int i = 0;
+    int grading_options = sizeof(G_grading)/sizeof(GRADING_T);
+
+    while ((i < grading_options)
+           && (G_grading[i].check_code != check_code)) {
+       i++;
+    }
+    return (i < grading_options ? i : -1);
+}
+
+extern void read_grading(char *grading_file) {
+    FILE *fp;
+    char  line[LINE_LEN];
+    short linenum = 0;
+    char *p;
+    char *q;
+    int   gcode;
+    int   gclosest = GRAD_NOT_FOUND;
+    int   smallest_lev;
+    int   lev;
+    int   i;
+    int   current;
+    int   next;
+    char  ok = 1;
+    int   grading_options;
+    short previous_check = -1;
+    short rule;
+
+    // First finish setting up the default values
+    if (G_grading_seq[0] != GRAD_START_GRADE) {
+      fprintf(stderr, "Incorrectly set default grading scheme "
+                      "(first code must be GRAD_START_GRADE)\n");
+      exit(1);
+    }
+    grading_options = sizeof(G_grading)/sizeof(GRADING_T);
+    // First initialize all starts, and spot the beginning
+    // of the chain (START_GRADE)
+    for (i = 1; i < grading_options; i++) {
+      G_grading[i].next = -1;
+      if ((G_chain_start == -1) 
+           && (G_grading[i].check_code == GRAD_START_GRADE)) {
+        G_chain_start = i;
+      }
+    }
+    // Set the default sequence for check operations
+    current = G_chain_start;
+    for (i = 1; i < GRAD_COUNT; i++) {
+      next = find_index(G_grading_seq[i]);
+      if (next == -1) {
+        fprintf(stderr,
+                "Incorrectly set default grading scheme (%s not found)\n",
+                grad_keyword((int)G_grading_seq[i]));
+        exit(1);
+      }
+      G_grading[current].next = next;
+      current = next;
+    }
+    //
+    // OK, now look for a configuration file
+    //
+    if (grading_file) {
+      if ((fp = fopen(grading_file, "r")) == NULL) {
+        perror(grading_file);
+        ok = 0;
+      }
+    } else {
+      fp = fopen("grading.conf", "r");
+    }
+    if (fp) {
+      while (ok && fgets(line, LINE_LEN, fp)) {
+        linenum++;
+        if ((p = strchr(line, '#')) != NULL) {
+          *p = '\0';
+        }
+        _trim(line);
+        p = line;
+        if (*p) {
+          _skip_spaces(p);
+          if ((q = strchr(p, '=')) != NULL) {
+            *q++ = '\0';
+            _skip_spaces(q);
+          }
+          _trim(p);
+          gcode = grad_search(p);
+          if (gcode == GRAD_NOT_FOUND) {
+            fprintf(stderr, "Invalid grading control %s\n", p);
+            // Try to find the closest one
+            smallest_lev = strlen(p) + 1;
+            for (i = 0; i < GRAD_COUNT; i++) {
+              lev = levenshtein(p, grad_keyword(i));
+              if (lev < smallest_lev) {
+                smallest_lev = lev;
+                gclosest = i;
+              }
+            }
+            if (gclosest == GRAD_NOT_FOUND) {
+              fprintf(stderr, "Do you mean \"%s\"?\n",
+                              grad_keyword(gclosest));
+            }
+            ok = 0;
+          } else {
+            if ((previous_check == -1) 
+               && (gcode != GRAD_START_GRADE)) {
+              // Invalid - Start grade MUST come first
+              fprintf(stderr, "start_grade must be specified first"
+                              " even when no grading is applied.\n");
+              ok = 0;
+            } 
+            i = 0;
+            while ((i < grading_options)
+                   && ((int)G_grading[i].check_code != gcode)) {
+              i++;
+            }
+            if (i < grading_options) {
+              if (gcode != GRAD_START_GRADE) {
+                if (previous_check == -1) {
+                  G_grading[G_chain_start].next = i;
+                } else {
+                  G_grading[previous_check].next = i;
+                }
+              }
+              G_grading[i].next = -1;
+              previous_check = i;
+              // Now check what we have on the line
+              switch (*q) {
+                case '<':
+                case '>':
+                     if (strncmp(grad_keyword(gcode), "percent_", 8)) {
+                       fprintf(stderr,
+                            "Threshold value only valid with"
+                            " queries that return a percentage line %d\n",
+                            linenum);
+                       ok = 0;
+                     } else { 
+                       rule = (*q == '>' ? AT_MOST : AT_LEAST);
+                       q++;
+                       // Read the threshold value
+                       if (sscanf(q, "[%f]",
+                                  &(G_grading[i].threshold)) == 0) { 
+                         fprintf(stderr,
+                                 "Invalid threshold syntax line %d "
+                                 " (%c[threshold value] expected)\n",
+                                 (rule == AT_MOST ? '<' : '>'),
+                                 linenum);
+                         ok = 0; 
+                       }
+                     }
+                     if (ok) {
+                       ok = (0 ==  read_rules(q, &(G_grading[i].rule),
+                                              &(G_grading[i].val), linenum));
+                     }
+                     if (ok) {
+                       G_grading[i].rule |= rule;
+                     }
+                     break;
+                default :
+                     if (strncmp(grad_keyword(gcode), "percent_", 8)) {
+                       fprintf(stderr,
+                                "Threshold (>[value] or <[value])"
+                                 " expected with %s line %d\n",
+                                 grad_keyword(gcode), linenum);
+                       ok = 0;
+                     } else {
+                       ok = (0 ==  read_rules(q, &(G_grading[i].rule),
+                                              &(G_grading[i].val), linenum));
+                     }
+                     break;
+              }
+            }  // else missing option - ignore
+               // Valid option not implemented yet
+          }
+        }
+      }
+      fclose(fp);
+    } else {
+      fprintf(stderr, "Warning: applying the default grading scheme\n");
+    }
+}
+
+extern void show_grading(void) {
+    short i = G_chain_start;
+    short rule;
+    printf("#\n");
+    printf("# Rules are expressed as :\n");
+    printf("#   rule_name [ = formula]\n");
+    printf("# If the formula is absent, the rule will be checked and\n");
+    printf("# problems reported, but the rule will not intervene in\n");
+    printf("# the computation of a grade.\n");
+    printf("# For the start grade (must come first if you grade) the\n");
+    printf("# formula is a simple assignment. Otherwise, the formula is\n");
+    printf("# an operator (+,-,*,/) followed by the value applied to\n");
+    printf("# the grade. If the operator is repeated, the operation\n");
+    printf("# is applied for every occurence.\n");
+    printf("# Rules the name of which starts with \"percent\" take\n");
+    printf("# a comparator (< or >) followed by a threshold value between\n");
+    printf ("# square brackets before the formula proper.\n");
+    printf("# \n");
+
+    while (i != -1) {
+        rule = G_grading[i].rule & ~AT_MOST & ~AT_LEAST;
+        if (G_grading[i].description) {
+          printf("# %s\n", G_grading[i].description);
+        }
+        if (G_grading[i].rule & AT_LEAST) {
+          printf("# when percentage is smaller than threshold\n");
+        } else if (G_grading[i].rule & AT_MOST) {
+          printf("# when percentage is greater than threshold\n");
+        }
+        switch(rule) {
+          case MULT_EACH:
+               printf("# multiply grade by %.1f for each occurrence\n",
+                       G_grading[i].val);
+               break;
+          case MULT_ONCE:
+               printf("# multiply grade by %.1f if it happens\n",
+                       G_grading[i].val);
+               break;
+          case SUB_EACH:
+               printf("# subtract %d from grade for each occurrence\n",
+                      (int)G_grading[i].val);
+               break;
+          case SUB_ONCE:
+               printf("# subtract %d from grade if it happens\n",
+                      (int)G_grading[i].val);
+               break;
+          case ADD_EACH:
+               printf("# add %d to grade for each occurrence\n",
+                      (int)G_grading[i].val);
+               break;
+          case ADD_ONCE:
+               printf("# add %d to grade if it happens\n",
+                      (int)G_grading[i].val);
+               break;
+          default:
+               break;
+        } 
+        printf("%s%s",
+               grad_keyword(G_grading[i].check_code),
+               (rule == NO_RULE ? "" : " = "));
+
+        if (G_grading[i].rule & AT_MOST) {
+          printf(">[%.1f]", G_grading[i].threshold);
+        } else if (G_grading[i].rule & AT_LEAST) {
+          printf("<[%.1f]", G_grading[i].threshold);
+        }
+        if (G_grading[i].val && (rule != NO_RULE)) {
+          switch(rule) {
+              case ASSIGN:
+                   break;
+              case MULT_EACH:
+                   putchar('*');
+              case MULT_ONCE:
+                   putchar('*');
+                   break;
+              case SUB_EACH:
+                   putchar('-');
+              case SUB_ONCE:
+                   putchar('-');
+                   break;
+              case ADD_EACH:
+                   putchar('+');
+              case ADD_ONCE:
+                   putchar('+');
+                   break;
+              default:
+                   break;
+          } 
+          printf("%.1f\n", G_grading[i].val);
+        } else {
+          putchar('\n');
+        }
+        i = G_grading[i].next;
+    }
+}
+
+extern int grade(char report) {
+    short       i = G_chain_start;
+    short       rule;
+    float       prev_grade = 0;
+    float       work_grade = 0;
+    int         query_result;
+    short       k;
+    short       rule_cnt = 0;
+    char        no_grading = 0;
+    OVERVIEW_T  overview;
+
+    // Get the start grade
+    if (i < 0) {
+      i = 0;
+      no_grading = 1;
+    }
+    if (G_grading[i].check_code != GRAD_START_GRADE) {
+      fprintf(stderr, "Unknown starting grade\n");
+      if (debugging()) {
+        printf("i = %d (chain start = %d)\n", i, G_chain_start);
+        grading_info(&(G_grading[i]));
+      } 
+      no_grading = 1;
+    } else {
+      work_grade = G_grading[i].val;
+    }
+    (void)memset(&overview, 0, sizeof(OVERVIEW_T));
+    // Get overview info
+    (void)db_basic_info(&(overview.tabcnt), &(overview.datacnt));
+    overview.rel = db_relationships();
+    overview.selfref = db_selfref();
+    if (report) {
+      RELATIONSHIP_T *r;
+      NAME_ITEM_T    *n;
+      printf("%d tables in the schema and %d pieces of information.\n",
+             overview.tabcnt, overview.datacnt);
+      if ((r = overview.rel) != NULL) {
+        printf("Relationships:\n");
+        do { 
+           printf("\t%s\t[%s]\t%s\n", r->tab1, r->cardinality, r->tab2);
+        } while ((r = r->next) != NULL);
+      } else {
+        printf("-- No relationships\n");
+      }
+      if ((n = overview.selfref) != NULL) {
+        printf("Tables with self references:\n");
+        do { 
+           printf("\t%s\n", n->name);
+        } while ((n = n->next) != NULL);
+      } else {
+        printf("-- No self-referencing tables\n");
+      }
+    }
+    prev_grade = work_grade;
+    while (i != -1) {
+      if (debugging()) { 
+        printf("i = %hd\n", i);
+        grading_info(&(G_grading[i]));
+      }
+      rule = G_grading[i].rule & ~AT_MOST & ~AT_LEAST;
+      if (!no_grading && (rule != NO_RULE)) {
+        rule_cnt++;
+      }
+      if (G_grading[i].sql) {
+        if (report && G_grading[i].description) {
+          printf("%s\n", G_grading[i].description);
+        }
+        // Depending on the query, the result will either
+        // be a percentage or a number of elements found
+        query_result = db_runcheck(G_grading[i].check_code,
+                                   report,
+                                   G_grading[i].sql,
+                                   NULL);
+        if (G_grading[i].rule & AT_MOST) {
+          query_result = (query_result > G_grading[i].threshold ? 1 : 0);
+        } else if (G_grading[i].rule & AT_LEAST) {
+          query_result = (query_result < G_grading[i].threshold ? 1 : 0);
+        }
+      }
+      if (G_grading[i].val) {
+        switch(rule) {
+          case MULT_EACH:
+               for (k = 0; k < query_result; k++) {
+                 work_grade *= G_grading[i].val;
+               }
+               if (report && !no_grading && (prev_grade != work_grade)) {
+                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                               (int)(work_grade+0.5));
+               }
+               break;
+          case MULT_ONCE:
+               if (query_result) {
+                 work_grade *= G_grading[i].val;
+               }
+               if (report && !no_grading && (prev_grade != work_grade)) {
+                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                               (int)(work_grade+0.5));
+               }
+               break;
+          case SUB_EACH:
+               work_grade -= (query_result * G_grading[i].val);
+               if (report && !no_grading && (prev_grade != work_grade)) {
+                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                               (int)(work_grade+0.5));
+               }
+               break;
+          case SUB_ONCE:
+               if (query_result) {
+                 work_grade -= G_grading[i].val;
+               }
+               if (report && !no_grading && (prev_grade != work_grade)) {
+                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                               (int)(work_grade+0.5));
+               }
+               break;
+          case ADD_EACH:
+               work_grade += (query_result * G_grading[i].val);
+               if (report && !no_grading && (prev_grade != work_grade)) {
+                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                               (int)(work_grade+0.5));
+               }
+               break;
+          case ADD_ONCE:
+               if (query_result) {
+                 work_grade += G_grading[i].val;
+               }
+               if (report && !no_grading && (prev_grade != work_grade)) {
+                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                               (int)(work_grade+0.5));
+               }
+               break;
+          default:
+               break;
+        } 
+      } 
+      i = G_grading[i].next;
+      prev_grade = work_grade;
+    }
+    if (overview.rel) {
+      free_relationships(&(overview.rel));
+    }
+    if (overview.selfref) {
+      free_names(&(overview.selfref));
+    }
+    if (rule_cnt) {
+      if (work_grade > 100) {
+        work_grade = 100;
+      } else {
+        if (work_grade < 0) {
+          work_grade = 0;
+        }
+      }
+      return (int)(work_grade + 0.5);
+    }
+    return -1;
+}

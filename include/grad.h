@@ -1,0 +1,30 @@
+#ifndef _GRAD_HEADER
+
+#define _GRAD_HEADER
+
+#define GRAD_NOT_FOUND	-1
+#define GRAD_CIRCULAR_FK	  0
+#define GRAD_EVERYTHING_NULLABLE	  1
+#define GRAD_ISOLATED_TABLES	  2
+#define GRAD_MULTIPLE_LEGS	  3
+#define GRAD_NO_PK	  4
+#define GRAD_NO_UNIQUENESS	  5
+#define GRAD_ONE_ONE_RELATIONSHIP	  6
+#define GRAD_PERCENT_COMMENTED_COLUMNS	  7
+#define GRAD_PERCENT_COMMENTED_TABLES	  8
+#define GRAD_PERCENT_SINGLE_COL_IDX	  9
+#define GRAD_REDUNDANT_INDEXES	 10
+#define GRAD_SAME_DATATYPE_FOR_ALL_COLS	 11
+#define GRAD_SAME_VARCHAR_LENGTH	 12
+#define GRAD_SINGLE_COL_TABLE	 13
+#define GRAD_START_GRADE	 14
+#define GRAD_TOO_MANY_FK_TO_SAME	 15
+#define GRAD_ULTRA_WIDE	 16
+#define GRAD_USELESS_AUTOINC	 17
+
+#define GRAD_COUNT	18
+
+extern int   grad_search(char *w);
+extern char *grad_keyword(int code);
+
+#endif
