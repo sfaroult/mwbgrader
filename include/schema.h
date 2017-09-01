@@ -7,12 +7,14 @@
 #define TYPE_LEN    20
 
 typedef struct tabtable {
+            short varid;
             char  id[ID_LEN];
             char  name[NAME_LEN];
             short comment_len;
           } TABTABLE_T;
 
 typedef struct tabcolumn {
+            short varid;
             char  id[ID_LEN];
             char  tabid[ID_LEN];
             char  name[NAME_LEN];
@@ -27,6 +29,7 @@ typedef struct tabcolumn {
           } TABCOLUMN_T;
 
 typedef struct tabindex {
+            short varid;
             char  id[ID_LEN];
             char  tabid[ID_LEN];
             char  name[NAME_LEN];
@@ -35,13 +38,15 @@ typedef struct tabindex {
           } TABINDEX_T;
 
 typedef struct tabindexcol {
-            char  id[ID_LEN];
+            short varid;
+            char  tabid[ID_LEN];
             char  idxid[ID_LEN];
             char  colid[ID_LEN];
             short seq;
           } TABINDEXCOL_T;
 
 typedef struct tabforeignkey {
+            short varid;
             char  id[ID_LEN];
             char  tabid[ID_LEN];
             char  name[NAME_LEN];
@@ -49,9 +54,10 @@ typedef struct tabforeignkey {
           } TABFOREIGNKEY_T;
 
 typedef struct colforeignkey {
-             char  colid[ID_LEN];
-             char  refcolid[ID_LEN];
-             struct colforeignkey *next;
+            short varid;
+            char  colid[ID_LEN];
+            char  refcolid[ID_LEN];
+            struct colforeignkey *next;
           } COLFOREIGNKEY_T;
 
 extern void free_colfk(COLFOREIGNKEY_T **colfkp);

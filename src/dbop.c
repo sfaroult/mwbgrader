@@ -98,16 +98,39 @@ extern void free_names(NAME_ITEM_T **np) {
 }
 
 // In-memory table creation
-static char *G_ddl[] =
-            {"create table tabTable"
-             "   (id          varchar(50) not null primary key,"
+static char *G_refddl[] =
+            {"create table tabVariant"
+             "   (id          integer primary key,"
+             "    model_name  text not null,"
+             "    max_points  int not null default 100,"
+             "    constraint tabVariant_uq unique(model_name))",
+             "create table tabTable"
+             "   (id          integer not null primary key,"
+             "    varid       int not null,"
+             "    mwb_id      varchar(50) not null unique,"
              "    name        varchar(64) not null,"
              "    comment_len int default 0,"
+             "    constraint tabTable_fk foreign key(varid)"
+             "               references tabVariant(id),"
              "    constraint tabTable_u"
-             "       unique (name))",
+             "       unique (varid,name))",
+             NULL};
+
+static char *G_ddl[] =
+            {"create table tabTable"
+             "   (id          integer not null primary key,"
+             "    varid       int not null default 0,"
+             "    mwb_id      varchar(50) not null unique,"
+             "    name        varchar(64) not null,"
+             "    comment_len int default 0,"
+             "    constraint tabTable_u1"
+             "       unique (name, varid),"
+             "    constraint tabTable_u2"
+             "       unique (mwb_id, varid))",
              "create table tabColumn"
-             "   (id            varchar(50) not null primary key,"
-             "    tabid         varchar(50) not null,"
+             "   (id            integer primary key,"
+             "    mwb_id        varchar(50) not null,"
+             "    tabid         int not null,"
              "    name          varchar(64) not null,"
              "    dataType      varchar(20) not null,"
              "    comment_len   int default 0,"
@@ -117,37 +140,54 @@ static char *G_ddl[] =
              "    colLength     int,"
              "    precision     int,"
              "    scale         int,"
+             "    constraint tabColumn_u1"
+             "       unique (tabid, mwb_id),"
+             "    constraint tabColumn_u2"
+             "       unique (tabid, name),"
              "    constraint tabColumn_fk"
              "       foreign key(tabid) references tabTable(id))",
              "create table tabIndex"
-             "   (id            varchar(50) not null primary key,"
-             "    tabid         varchar(50) not null,"
+             "   (id            integer primary key,"
+             "    mwb_id        varchar(50) not null,"
+             "    tabid         int not null,"
              "    name          varchar(64) not null,"
              "    isPrimary     char(1) not null default '0',"
              "    isUnique      char(1) not null default '0',"
+             "    constraint tabIndex_u1"
+             "       unique(mwb_id, tabid),"
+             "    constraint tabIndex_u2"
+             "       unique(name, tabid),"
              "    constraint tabIndex_fk"
              "       foreign key(tabid) references tabTable(id))",
              "create table tabIndexCol"
-             "   (id                varchar(50) not null primary key,"
-             "    idxid             varchar(50) not null,"
-             "    colid             varchar(50) not null,"
-             "    seq               int not null,"
+             "   (idxid         int not null,"
+             "    colid         int not null,"
+             "    seq           int not null,"
+             "    constraint tabIndexCol_pk"
+             "       primary key(idxid, colid),"
              "    constraint tabIndexCol_fk1"
              "       foreign key(idxid) references tabIndex(id),"
              "    constraint tabIndexCol_fk2"
              "       foreign key(colid) references tabColumn(id))",
              "create table tabForeignKey"
-             "   (id                  varchar(50) not null primary key,"
-             "    tabid               varchar(50) not null,"
-             "    name                varchar(64),"
-             "    reftabid            varchar(50) not null,"
-             "    constraint tabForeignKey_u"
-             "       unique(name))",
+             "   (id            integer primary key,"
+             "    mwb_id        varchar(50) not null,"
+             "    tabid         int not null,"
+             "    name          varchar(64),"
+             "    reftabid      int not null,"
+             "    constraint tabForeignKey_u1"
+             "       unique(name,tabid),"
+             "    constraint tabForeignKey_u2"
+             "       unique(mwb_id,tabid),"
+             "    constraint tabForeignKey_fk1"
+             "       foreign key(tabid) references tabTable(id),"
+             "    constraint tabForeignKey_fk2"
+             "       foreign key(reftabid) references tabTable(id))",
              "create table tabFKCol"
-             "   (fkid              varchar(50) not null,"
-             "    colid             varchar(50) not null,"
-             "    refcolid          varchar(50) not null,"
-             "    seq               int not null,"
+             "   (fkid          int not null,"
+             "    colid         int not null,"
+             "    refcolid      int not null,"
+             "    seq           int not null,"
              "    constraint tabFKcol_pk"
              "       primary key(fkid,colid),"
              "    constraint tabFKCol_fk1"
@@ -161,15 +201,18 @@ static char *G_ddl[] =
 extern int insert_table(TABTABLE_T *t) {
     sqlite3_stmt *stmt;
     char         *ztail = NULL;
-    int           ret = 0;
+    int           ret = -1;
 
-    if (t && t->id[0]) {
-      // Must check that REPLACE doesn't mess up with FKs
+    if (t) {
+      ret = 0;
+      if (debugging()) {
+        fprintf(stderr, ">> insert_table(%s[%s])\n", t->id, t->name);
+      }
       _must_succeed("insert table",
                     sqlite3_prepare_v2(G_db,
-                                "insert or replace into tabTable(id, name,"
-                                "comment_len)"
-                                " values(?1,lower(?2),?3)",
+                                "insert into tabTable(mwb_id,"
+                                "name,comment_len,varid)"
+                                " values(?1,lower(?2),?3,?4)",
                                 -1, 
                                 &stmt,
                                 (const char **)&ztail));
@@ -180,13 +223,55 @@ extern int insert_table(TABTABLE_T *t) {
                                 (const char*)t->name, -1,
                                 SQLITE_STATIC) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 3, (int)t->comment_len) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 4, (int)t->varid) != SQLITE_OK)
           || (sqlite3_step(stmt) != SQLITE_DONE)) {
-        fprintf(stderr, "Failure inserting/updating table\n");
-        fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
-        ret = -1;
+        char fail = 1;
+        if ((sqlite3_errcode(G_db) == SQLITE_CONSTRAINT)
+            && (sqlite3_extended_errcode(G_db) == SQLITE_CONSTRAINT_UNIQUE)
+            && (strcmp(t->name, t->id) != 0)) {
+          fail = 0; 
+          sqlite3_finalize(stmt);
+          _must_succeed("update table",
+                    sqlite3_prepare_v2(G_db,
+                                "update tabTable"
+                                " set name=lower(?1),"
+                                "     comment_len=?2"
+                                " where varid=?3"
+                                " and mwb_id=?4",
+                                -1, 
+                                &stmt,
+                                (const char **)&ztail));
+          if ((sqlite3_bind_text(stmt, 1,
+                                (const char*)t->name, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+               || (sqlite3_bind_int(stmt, 2, (int)t->comment_len) != SQLITE_OK)
+               || (sqlite3_bind_int(stmt, 3, (int)t->varid) != SQLITE_OK)
+               || (sqlite3_bind_text(stmt, 4,
+                            (const char*)t->id, -1,
+                            SQLITE_STATIC) != SQLITE_OK)
+               || (sqlite3_step(stmt) != SQLITE_DONE)) {
+            fail = 1;
+          }
+        }
+        if (fail) {
+          if (strcmp(t->name, t->id)) {
+            fprintf(stderr, "Failure inserting/updating table\n");
+            fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                            sqlite3_errmsg(G_db),
+                            sqlite3_errcode(G_db),
+                            sqlite3_extended_errcode(G_db));
+          } else {
+            if (debugging()) {
+               fprintf(stderr, " %s [%s] already known\n", t->id, t->name);
+            }
+          }
+          ret = -1;
+        }
       }
       sqlite3_finalize(stmt);
-      memset(t, 0, sizeof(TABTABLE_T));
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< insert_table - %s\n", (ret == 0 ? "SUCCESS":"FAILURE"));
     }
     return ret;
 }
@@ -196,15 +281,21 @@ extern int insert_column(TABCOLUMN_T *c) {
     char         *ztail = NULL;
     char          ok = 1;
 
-    if (c && c->id[0]) {
+    if (c) {
+      if (debugging()) {
+        fprintf(stderr, ">> insert_column(%s[%s]) table %s\n",
+                        c->id, c->name, c->tabid);
+      }
       _must_succeed("insert column",
                     sqlite3_prepare_v2(G_db,
-                                "insert into tabColumn(id, tabid,"
+                                "insert into tabColumn(mwb_id,tabid,"
                                 " name,dataType,autoInc,defaultValue,"
                                 " isNotNull,colLength,precision,scale,"
                                 " comment_len)"
-                                " values(?1,?2,lower(?3),lower(?4),?5,?6,"
-                                "?7,?8,?9,?10,?11)",
+                                " select ?1,id,lower(?3),lower(?4),?5,?6,"
+                                "?7,?8,?9,?10,?11"
+                                " from tabTable where mwb_id=?2"
+                                " and varid=?12",
                                 -1, 
                                 &stmt,
                                 (const char **)&ztail));
@@ -229,7 +320,8 @@ extern int insert_column(TABCOLUMN_T *c) {
           || (sqlite3_bind_int(stmt, 8, (int)c->collength) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 9, (int)c->precision) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 10, (int)c->scale) != SQLITE_OK)
-          || (sqlite3_bind_int(stmt, 11, (int)c->comment_len) != SQLITE_OK)) {
+          || (sqlite3_bind_int(stmt, 11, (int)c->comment_len) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 12, (int)c->varid) != SQLITE_OK)) {
         fprintf(stderr, "Binding error\n");
         fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
         ok = 0;
@@ -249,8 +341,102 @@ extern int insert_column(TABCOLUMN_T *c) {
         }
       }
       if (ok && (sqlite3_step(stmt) != SQLITE_DONE)) {
-        fprintf(stderr, "Failure inserting column\n");
-        fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
+        char fail = 1;
+        if ((sqlite3_errcode(G_db) == SQLITE_CONSTRAINT)
+            && (sqlite3_extended_errcode(G_db) == SQLITE_CONSTRAINT_UNIQUE)
+            && (strcmp(c->name, c->id) != 0)) {
+          fail = 0; 
+          sqlite3_finalize(stmt);
+          _must_succeed("update column",
+                    sqlite3_prepare_v2(G_db,
+                                "update tabColumn"
+                                " set name=lower(?1),"
+                                "     datatype=lower(?2),"
+                                "     autoInc=?3,"
+                                "     defaultValue=?4,"
+                                "     isNotNull=?5,"
+                                "     collength=?6,"
+                                "     precision=?7,"
+                                "     scale=?8,"
+                                "     comment_len=?9"
+                                " where tabid=(select id from tabTable"
+                                "     where mwb_id=?10"
+                                "       and varid=?11)"
+                                " and mwb_id=?12",
+                                -1, 
+                                &stmt,
+                                (const char **)&ztail));
+          if ((sqlite3_bind_text(stmt, 12,
+                                 (const char*)c->id, -1,
+                                 SQLITE_STATIC) != SQLITE_OK)
+              || (sqlite3_bind_text(stmt, 10,
+                                    (const char*)c->tabid, -1,
+                                    SQLITE_STATIC) != SQLITE_OK)
+              || (sqlite3_bind_text(stmt, 1,
+                                    (const char*)c->name, -1,
+                                    SQLITE_STATIC) != SQLITE_OK)
+              || (sqlite3_bind_text(stmt, 2,
+                                    (const char*)c->datatype, -1,
+                                    SQLITE_STATIC) != SQLITE_OK)
+              || (sqlite3_bind_text(stmt, 3,
+                                    (const char*)&(c->autoinc), 1,
+                                    SQLITE_STATIC) != SQLITE_OK)
+              || (sqlite3_bind_text(stmt, 5,
+                                    (const char*)&(c->isnotnull), 1,
+                                    SQLITE_STATIC) != SQLITE_OK)
+              || (sqlite3_bind_int(stmt, 6, (int)c->collength) != SQLITE_OK)
+              || (sqlite3_bind_int(stmt, 7, (int)c->precision) != SQLITE_OK)
+              || (sqlite3_bind_int(stmt, 8, (int)c->scale) != SQLITE_OK)
+              || (sqlite3_bind_int(stmt, 9, (int)c->comment_len) != SQLITE_OK)
+              || (sqlite3_bind_int(stmt, 11, (int)c->varid) != SQLITE_OK)) {
+            fprintf(stderr, "Binding error\n");
+            fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
+            ok = 0;
+          }
+          if (c->defaultvalue) {
+            if (ok && (sqlite3_bind_text(stmt, 4, (const char *)c->defaultvalue,
+                                         -1, SQLITE_STATIC) != SQLITE_OK)) {
+              fprintf(stderr, "Binding error\n");
+              fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
+              ok = 0;
+            }
+          } else {
+            if (ok && (sqlite3_bind_null(stmt, 4) != SQLITE_OK)) {
+              fprintf(stderr, "Binding error\n");
+              fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
+              ok = 0;
+            }
+          }
+          if (ok && (sqlite3_step(stmt) != SQLITE_DONE)) {
+            fail = 1;
+          }
+        }
+        if (fail) {
+          if (strcmp(c->name, c->id)) {
+            fprintf(stderr, "Failure inserting/updating column\n");
+            fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                            sqlite3_errmsg(G_db),
+                            sqlite3_errcode(G_db),
+                            sqlite3_extended_errcode(G_db));
+          } else {
+            if (debugging()) {
+               fprintf(stderr, "OK - %s [%s] already known\n", c->id, c->name);
+            }
+          }
+          ok = 0;
+        }
+      }
+      if (ok && (sqlite3_changes(G_db) == 0)) {
+        // Table probably not inserted yet
+        TABTABLE_T t;
+        memset(&t, 0, sizeof(TABTABLE_T));
+        t.varid = c->varid;
+        strncpy(t.id, c->tabid, ID_LEN);
+        strncpy(t.name, c->tabid, NAME_LEN);
+        t.comment_len = 0;
+        if (insert_table(&t) == 0) {
+          ok = (insert_column(c) != -1);
+        }
       }
       sqlite3_finalize(stmt);
       if (c->defaultvalue) {
@@ -258,20 +444,30 @@ extern int insert_column(TABCOLUMN_T *c) {
       }
       memset(c, 0, sizeof(TABCOLUMN_T));
     }
+    if (debugging()) {
+      fprintf(stderr, "<< insert_column - %s\n", (ok ? "SUCCESS":"FAILURE"));
+    }
     return (ok ? 0 : -1);
 }
 
 extern int insert_index(TABINDEX_T *i) {
     sqlite3_stmt *stmt;
     char         *ztail = NULL;
-    int           ret = 0;
+    int           ret = -1;
 
-    if (i && i->id[0]) {
+    if (i) {
+      ret = 0;
+      if (debugging()) {
+        fprintf(stderr, ">> insert_index(%s[%s]) table %s\n",
+                        i->id, i->name, i->tabid);
+      }
       _must_succeed("insert index",
                     sqlite3_prepare_v2(G_db,
-                                "insert or replace into tabIndex(id, tabid,"
+                                "insert into tabIndex(mwb_id,tabid,"
                                 "name,isPrimary,isUnique)"
-                                " values(?1,?2,lower(?3),?4,?5)",
+                                " select ?1,id,lower(?3),?4,?5"
+                                " from tabTable where mwb_id=?2"
+                                " and varid=?6",
                                 -1, 
                                 &stmt,
                                 (const char **)&ztail));
@@ -290,13 +486,59 @@ extern int insert_index(TABINDEX_T *i) {
           || (sqlite3_bind_text(stmt, 5,
                                 (const char*)&(i->isunique), 1,
                                 SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 6, (int)i->varid) != SQLITE_OK)
           || (sqlite3_step(stmt) != SQLITE_DONE)) {
-        fprintf(stderr, "Failure inserting/updating index\n");
-        fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
-        ret = -1;
+        char fail = 1;
+        if ((sqlite3_errcode(G_db) == SQLITE_CONSTRAINT)
+            && (sqlite3_extended_errcode(G_db) == SQLITE_CONSTRAINT_UNIQUE)) {
+          fail = 0; 
+          sqlite3_finalize(stmt);
+          _must_succeed("update index",
+                    sqlite3_prepare_v2(G_db,
+                                "update tabIndex"
+                                " set name=lower(?1),"
+                                "     isPrimary=?2,"
+                                "     isUnique=?3"
+                                " where tabid=(select id from tabTable"
+                                "     where varid=?4"
+                                "       and mwb_id=?5)"
+                                " and mwb_id=?6",
+                                -1, 
+                                &stmt,
+                                (const char **)&ztail));
+          if ((sqlite3_bind_text(stmt, 1,
+                                (const char*)i->name, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+               || (sqlite3_bind_text(stmt, 2,
+                                (const char*)&(i->isprimary), 1,
+                                SQLITE_STATIC) != SQLITE_OK)
+               || (sqlite3_bind_text(stmt, 3,
+                                (const char*)&(i->isunique), 1,
+                                SQLITE_STATIC) != SQLITE_OK)
+               || (sqlite3_bind_int(stmt, 4, (int)i->varid) != SQLITE_OK)
+               || (sqlite3_bind_text(stmt, 5,
+                                (const char*)i->tabid, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+               || (sqlite3_bind_text(stmt, 6,
+                                (const char*)i->id, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+               || (sqlite3_step(stmt) != SQLITE_DONE)) {
+            fail = 1;
+          }
+        }
+        if (fail) {
+          fprintf(stderr, "Failure inserting/updating index\n");
+          fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                        sqlite3_errmsg(G_db),
+                        sqlite3_errcode(G_db),
+                        sqlite3_extended_errcode(G_db));
+          ret = -1;
+        }
       }
       sqlite3_finalize(stmt);
-      memset(i, 0, sizeof(TABINDEX_T));
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< insert_index - %s\n", (ret == 0 ? "SUCCESS":"FAILURE"));
     }
     return ret;
 }
@@ -304,35 +546,166 @@ extern int insert_index(TABINDEX_T *i) {
 extern int insert_indexcol(TABINDEXCOL_T *ic) {
     sqlite3_stmt *stmt;
     char         *ztail = NULL;
-    int           ret = 0;
+    int           ret = -1;
 
-    if (ic && ic->id[0]) {
-      _must_succeed("insert index",
+    if (ic) {
+      ret = 0;
+      if (debugging()) {
+        fprintf(stderr, ">> insert_indexcol(index %s col %s)\n",
+                        ic->idxid, ic->colid);
+      }
+      _must_succeed("insert indexcol",
                     sqlite3_prepare_v2(G_db,
-                                "insert into tabIndexCol(id,idxid,colid,seq)"
-                                " values(?1,?2,?3,?4)",
+                                "insert into tabIndexCol(idxid,colid,seq)"
+                                " select i.id,c.id,?3"
+                                " from tabIndex i"
+                                " join tabColumn c"
+                                "  on c.tabid=i.tabid"
+                                " join tabTable t"
+                                "  on t.id=i.tabid"
+                                " where i.mwb_id=?1"
+                                " and c.mwb_id=?2"
+                                " and t.varid=?4",
                                 -1, 
                                 &stmt,
                                 (const char **)&ztail));
       if ((sqlite3_bind_text(stmt, 1,
-                            (const char*)ic->id, -1,
-                            SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_text(stmt, 2,
                                 (const char*)ic->idxid, -1,
                                 SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_text(stmt, 3,
+          || (sqlite3_bind_text(stmt, 2,
                                 (const char*)ic->colid, -1,
                                 SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_int(stmt, 4, (int)ic->seq) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 3, (int)ic->seq) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 4, (int)ic->varid) != SQLITE_OK)
           || (sqlite3_step(stmt) != SQLITE_DONE)) {
         fprintf(stderr, "Failure inserting index column\n");
         fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
         ret = -1;
       }
+      if (!ret && (sqlite3_changes(G_db) == 0)) {
+        // Index and table are necessarily inserted,
+        // the column may be missing
+        TABCOLUMN_T c;
+        char        insert_col;
+
+        if (debugging()) {
+          fprintf(stderr, "No error but index column not inserted\n");
+        }
+        memset(&c, 0, sizeof(TABCOLUMN_T));
+        c.varid = ic->varid;
+        strncpy(c.tabid, ic->tabid, ID_LEN);
+        strncpy(c.id, ic->colid, ID_LEN);
+        strncpy(c.name, ic->colid, NAME_LEN);
+        insert_col = insert_column(&c);
+        if (debugging()) {
+          fprintf(stderr, "(IDX col) Insertion of %s: %s\n", c.id,
+                              (insert_col ? "FAILED" : "SUCCEEDED"));
+        }
+        if (insert_col == 0) { // Try again
+          ret = insert_indexcol(ic);
+        } else {
+          ret = -1;
+        }
+      }
       sqlite3_finalize(stmt);
-      memset(ic, 0, sizeof(TABINDEXCOL_T));
     }
-    return 0;
+    if (debugging()) {
+      fprintf(stderr, "<< insert_indexcol - %s\n", (ret == 0 ? "SUCCESS":"FAILURE"));
+    }
+    return ret;
+}
+
+static int insert_fkcol(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *fkc, int i) {
+    sqlite3_stmt *stmt;
+    char         *ztail = NULL;
+    int           ret = -1;
+
+    if (fk && fkc) {
+      ret = 0;
+      if (debugging()) {
+        fprintf(stderr, ">> insert_fkcol(fk %s, col %s, rcol %s)\n",
+                        fk->id, fkc->colid, fkc->refcolid);
+      }
+      _must_succeed("insert fkcol",
+                    sqlite3_prepare_v2(G_db,
+                                "insert into tabFKcol(fkid,colid,"
+                                "refcolid,seq)"
+                                " select fk.id,c1.id,c2.id,?4"
+                                " from tabForeignKey fk"
+                                "  join tabColumn c1"
+                                "  on c1.tabid=fk.tabid"
+                                "  join tabTable t1"
+                                "  on t1.id=c1.tabid"
+                                "  join tabColumn c2"
+                                "  on c2.tabid=fk.reftabid"
+                                "  join tabTable t2"
+                                "  on t2.id=c2.tabid"
+                                " where fk.mwb_id=?1"
+                                " and c1.mwb_id=?2"
+                                " and c2.mwb_id=?3"
+                                " and t1.varid=t2.varid"
+                                " and t1.varid=?5",
+                                -1, 
+                                &stmt,
+                                (const char **)&ztail));
+      if ((sqlite3_bind_text(stmt, 1,
+                             (const char*)fk->id, -1,
+                             SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_text(stmt, 2,
+                                (const char*)fkc->colid, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_text(stmt, 3,
+                                (const char*)fkc->refcolid, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 4, i) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 5, (int)fk->varid) != SQLITE_OK)
+          || (sqlite3_step(stmt) != SQLITE_DONE)) {
+        fprintf(stderr, "Failure inserting foreign key column\n");
+        fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
+        ret = -1;
+      }
+      if (!ret && (sqlite3_changes(G_db) == 0)) {
+        // At this stage foreign key and tables
+        // are necessarily inserted. Only columns
+        // may be missing.
+        TABCOLUMN_T c;
+        char        insert_col = 1;
+
+        if (debugging()) {
+          fprintf(stderr, "No error but foreign key column not inserted\n");
+        }
+        memset(&c, 0, sizeof(TABCOLUMN_T));
+        c.varid = fk->varid;
+        strncpy(c.tabid, fk->tabid, ID_LEN);
+        strncpy(c.id, fkc->colid, ID_LEN);
+        strncpy(c.name, fkc->colid, NAME_LEN);
+        insert_col &= insert_column(&c);
+        if (debugging()) {
+          fprintf(stderr, "(FK col) Insertion of %s: %s\n", fkc->colid,
+                              (insert_col ? "FAILED" : "SUCCEEDED"));
+        }
+        // The other one
+        strncpy(c.tabid, fk->reftabid, ID_LEN);
+        strncpy(c.id, fkc->refcolid, ID_LEN);
+        strncpy(c.name, fkc->refcolid, NAME_LEN);
+        insert_col &= insert_column(&c);
+        if (debugging()) {
+          fprintf(stderr, "(FK col) Insertion of %s: %s\n", fkc->refcolid,
+                              (insert_col ? "FAILED" : "SUCCEEDED"));
+        }
+        // Try again
+        if (insert_col == 0) {
+          ret = insert_fkcol(fk, fkc, i);
+        } else {
+          ret = -1;
+        }
+      }
+      sqlite3_finalize(stmt);
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< insert_fkcol - %s\n", (ret == 0 ? "SUCCESS":"FAILURE"));
+    }
+    return ret;
 }
 
 extern int insert_foreignkey(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *cols) {
@@ -340,27 +713,29 @@ extern int insert_foreignkey(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *cols) {
     int              i;
     sqlite3_stmt    *stmt;
     char            *ztail = NULL;
-    sqlite3_stmt    *stmt2;
-    char            *ztail2 = NULL;
-    char             ok = 1;
+    char             ok = 0;
+    char             cols_done = 0;
 
-    if (fk && fk->id[0]) {
+    if (fk) {
+      ok = 1;
+      if (debugging()) {
+        fprintf(stderr, "insert_foreignkey(%s [%s]) tables %s->%s\n",
+                        fk->id, fk->name, fk->tabid, fk->reftabid);
+      }
       _must_succeed("insert foreign key",
                     sqlite3_prepare_v2(G_db,
-                                "insert into tabForeignKey(id,tabid,"
+                                "insert into tabForeignKey(mwb_id,tabid,"
                                 "name,reftabid)"
-                                " values(?1,?2,lower(?3),?4)",
+                                " select ?1,t1.id,lower(?3),t2.id"
+                                " from tabTable t1"
+                                "   join tabTable t2"
+                                "   on t2.varid=t1.varid"
+                                " where t1.mwb_id=?2"
+                                " and t2.mwb_id=?4"
+                                " and t1.varid=?5",
                                 -1, 
                                 &stmt,
                                 (const char **)&ztail));
-      _must_succeed("insert foreign key column",
-                    sqlite3_prepare_v2(G_db,
-                                "insert into tabFKcol(fkid,colid,"
-                                "refcolid,seq)"
-                                " values(?1,?2,?3,?4)",
-                                -1, 
-                                &stmt2,
-                                (const char **)&ztail2));
       if ((sqlite3_bind_text(stmt, 1,
                             (const char*)fk->id, -1,
                             SQLITE_STATIC) != SQLITE_OK)
@@ -373,39 +748,66 @@ extern int insert_foreignkey(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *cols) {
           || (sqlite3_bind_text(stmt, 4,
                                 (const char*)fk->reftabid, -1,
                                 SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 5, (int)fk->varid) != SQLITE_OK)
           || (sqlite3_step(stmt) != SQLITE_DONE)) {
-        fprintf(stderr, "Failure inserting foreign key\n");
-        fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
-        ok = 0;
+        if ((sqlite3_errcode(G_db) != SQLITE_CONSTRAINT)
+            || (sqlite3_extended_errcode(G_db) != SQLITE_CONSTRAINT_UNIQUE)) {
+          fprintf(stderr, "Failure inserting foreign key\n");
+          fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
+          ok = 0;
+        }
+      } else {
+        if (debugging()) {
+          fprintf(stderr, "-- Insertion of foreign key %s worked\n", fk->name);
+        }
       }
+      if (ok && (sqlite3_changes(G_db) == 0)) {
+        // Table probably not inserted yet
+        TABTABLE_T t;
+        char       insert_tab = 1;
+
+        if (debugging()) {
+          fprintf(stderr, "No error but foreign key %s not inserted\n", fk->name);
+        }
+        memset(&t, 0, sizeof(TABTABLE_T));
+        t.varid = fk->varid;
+        strncpy(t.id, fk->tabid, ID_LEN);
+        strncpy(t.name, fk->tabid, NAME_LEN);
+        t.comment_len = 0;
+        insert_tab &= insert_table(&t);
+        if (debugging()) {
+          fprintf(stderr, "(FK) Insertion of %s: %s\n", t.id,
+                              (insert_tab ? "FAILED" : "SUCCEEDED"));
+        }
+        // The other one
+        strncpy(t.id, fk->reftabid, ID_LEN);
+        strncpy(t.name, fk->reftabid, NAME_LEN);
+        insert_tab &= insert_table(&t);
+        if (debugging()) {
+          fprintf(stderr, "(FK) Insertion of %s: %s\n", t.id,
+                              (insert_tab ? "FAILED" : "SUCCEEDED"));
+        }
+        // Try again
+        if (insert_tab == 0) {
+          ok = (insert_foreignkey(fk, cols) != -1); 
+          cols_done = 1;
+        } else {
+          ok = 0;
+        }
+      }
+      sqlite3_finalize(stmt);
       c = cols;
-      if (ok && c) {
+      if (!cols_done && c) {
         i = 1;
         while (ok && c) {
-          if ((sqlite3_bind_text(stmt2, 1,
-                                (const char*)fk->id, -1,
-                                SQLITE_STATIC) != SQLITE_OK)
-              || (sqlite3_bind_text(stmt2, 2,
-                                    (const char*)c->colid, -1,
-                                    SQLITE_STATIC) != SQLITE_OK)
-              || (sqlite3_bind_text(stmt2, 3,
-                                    (const char*)c->refcolid, -1,
-                                    SQLITE_STATIC) != SQLITE_OK)
-              || (sqlite3_bind_int(stmt2, 4, i) != SQLITE_OK)
-              || (sqlite3_step(stmt2) != SQLITE_DONE)) {
-            fprintf(stderr, "Failure inserting foreign key column\n");
-            fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
-            ok = 0;
-          }
-          (void)sqlite3_reset(stmt2);
-          (void)sqlite3_clear_bindings(stmt2);
+          ok = (insert_fkcol(fk, c, i) != -1);
           c = c->next;
           i++;
         }
       }
-      sqlite3_finalize(stmt);
-      sqlite3_finalize(stmt2);
-      memset(fk, 0, sizeof(TABFOREIGNKEY_T));
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< insert_foreignkey - %s\n", (ok ? "SUCCESS":"FAILURE"));
     }
     return (ok ? 0 : -1);
 }
@@ -642,7 +1044,7 @@ extern RELATIONSHIP_T *db_relationships(void) {
                              " on t1.id=z.tabid1"
                              " join tabTable t2"
                              " on t2.id=z.tabid2"
-                             " order by t1.name",
+                             " order by 1,3,2",
                                        -1, 
                                        &stmt,
                                        (const char **)&ztail);

@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
         } else {
           // Connect to the memory database
           ret |= db_connect();
-          ret |= parseXML(p, 0, debugging());
+          ret |= parseXML(p, debugging(), debugging());
           mwbgrade = grade(G_report);
           if (mwbgrade >= 0) {
             if (G_report) {

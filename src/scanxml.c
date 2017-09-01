@@ -75,9 +75,9 @@ static void show_tag(char exiting, char *tag) {
    if (cat >= 0
        && cat < STATUS_CNT) {
       if (exiting) {
-        printf("</%s>", tag);
+        fprintf(stderr, "</%s>", tag);
       } else {
-         printf("\n%*.*s<%s>",
+        fprintf(stderr, "\n%*.*s<%s>",
            G_lvl, G_lvl, " ",
            tag);
       }
@@ -113,6 +113,9 @@ static void tag_insert(TAG_T **tagpp, char *tagname) {
    TAG_T  *t;
 
    if (tagpp) {
+      // if (G_debug) {
+      //   fprintf(stderr, "Creating tag node %s ...", tagname);
+      // }
       if ((t = (TAG_T *)malloc(sizeof(TAG_T))) != (TAG_T *)NULL) {
          t->level = G_lvl;
          t->name = strdup(tagname);
@@ -123,6 +126,9 @@ static void tag_insert(TAG_T **tagpp, char *tagname) {
         perror("malloc");
         exit(1);
       }
+      // if (G_debug) {
+      //   fprintf(stderr, " done\n");
+      // }
    }
 }
 
@@ -229,7 +235,7 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
               strncpy(catpath, G_status[G_lvl].catpath, SYNTH_ID_LEN);
 #else
               strncpy(catpath, catpath_keyword(G_status[G_lvl].catpath),
-                      SYNTH_ID_LEN);
+                        SYNTH_ID_LEN);
 #endif
               strncat(catpath, "_", SYNTH_ID_LEN - 1 - strlen(catpath));
             }
@@ -246,6 +252,10 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
             G_status[G_lvl].obj = 0;
           }
         } else if (G_status[G_lvl].obj && (strcmp((char *)n, "id") == 0)) {
+          if (G_debug) {
+            fprintf(stderr, "\nstatus = %s\n",
+                    G_category[G_status[G_lvl].cat]);
+          }
           switch (G_status[G_lvl].cat) {
             case STATUS_COL:
                  strncpy(G_col.id, (char *)v, ID_LEN);
@@ -264,7 +274,8 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
                  strncpy(G_idx.name, (char *)v, NAME_LEN);
                  break;
             case STATUS_ICO:
-                 strncpy(G_idxcol.id, (char *)v, ID_LEN);
+                 // Ignore the id. Useless.
+                 //strncpy(G_idxcol.id, (char *)v, ID_LEN);
                  strncpy(G_idxcol.idxid, G_idx.id, ID_LEN);
                  break;
             case STATUS_TAB:
@@ -311,13 +322,13 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
                           "%s_%s",
                           catpath_keyword(G_status[G_lvl].catpath),
                           (char *)v);
-                 if (G_debug) {
-                   printf("\n%s (", synth_id);
-                 }
+                 //if (G_debug) {
+                 //  printf("\n%s (", synth_id);
+                 //}
                  G_status[G_lvl].key = synth_search(synth_id);
-                 if (G_debug) {
-                   printf("%d)\n", G_status[G_lvl].key);
-                 }
+                 //if (G_debug) {
+                 //  printf("%d)\n", G_status[G_lvl].key);
+                 //}
                  break;
           }
 #endif
@@ -350,22 +361,40 @@ static int streamXML(xmlTextReaderPtr reader) {
 #endif
 
      if (reader != NULL) {
+        // if (G_debug) {
+        //   fprintf(stderr, "Calling xmlTextReaderRead()\n");
+        // }
         ret = xmlTextReaderRead(reader);
+        // if (G_debug) {
+        //   fprintf(stderr, "starting loop\n");
+        // }
         while (ret == 1) {
            type = xmlTextReaderNodeType(reader);
+           // if (G_debug) {
+           //   fprintf(stderr, "Node type = %d\n", type);
+           // }
            switch(type) {
               case XMLSTART:
+                   // if (G_debug) {
+                   //   fprintf(stderr, "XMLSTART\n");
+                   // }
                    if (!xmlTextReaderIsEmptyElement(reader)) {
                      name = (char *)xmlTextReaderConstName(reader);
                      G_lvl = (short)xmlTextReaderDepth(reader);
                      tag_insert(&G_tags_head, name);
+                     // if (G_debug) {
+                     //   fprintf(stderr, "Calling checkAttr()\n");
+                     // }
                      getCatKey = checkAttr(reader, name);
+                     // if (G_debug) {
+                     //   fprintf(stderr, "back from checkAttr()\n");
+                     // }
 #ifndef SETUP
                      if (G_status[G_lvl].catpath != prevCatPath) {
-                       if (G_debug) {
-                         printf("New catpath %s\n",
-                              catpath_keyword(G_status[G_lvl].catpath));
-                       }
+                       // if (G_debug) {
+                       //   fprintf(stderr, "New catpath %s\n",
+                       //        catpath_keyword(G_status[G_lvl].catpath));
+                       // }
                        prevCatPath = G_status[G_lvl].catpath;
                        switch (G_status[G_lvl].catpath) {
                          case CATPATH_TABLE_INDEX:
@@ -375,45 +404,99 @@ static int streamXML(xmlTextReaderPtr reader) {
                               break;
                        }
                      }
-                     if (G_debug) {
-                       show_tag(0, name);
-                     }
+                     // if (G_debug) {
+                     //   show_tag(0, name);
+                     // }
 #endif
                    }
                    break;
               case XMLEND:
+                   // if (G_debug) {
+                   //   fprintf(stderr, "XMLEND\n");
+                   // }
 #ifndef SETUP
                    name = (char *)xmlTextReaderConstName(reader);
                    G_lvl = (short)xmlTextReaderDepth(reader);
-                   if (G_debug) {
-                     show_tag(1, name);
-                   }
+                   // if (G_debug) {
+                   //   show_tag(1, name);
+                   // }
                    if (G_status[G_lvl].obj
                        && (strcasecmp(name, "value") == 0)) {
                      cat = G_status[G_lvl].cat;
 
                      if ((cat >= 0) && (cat < STATUS_CNT)) {
                        if (G_debug) {
-                         printf("\n%s - Leaving %s object --> insert\n",
+                         fprintf(stderr,
+                                 "\n%s - Leaving %s object --> insert\n",
                                  catpath_keyword(G_status[G_lvl].catpath),
                                  G_category[cat]);
                        }
                        switch (cat) {
                          case STATUS_COL:
+                              if (G_debug) {
+                                fprintf(stderr, "Inserting column:\n");
+                                fprintf(stderr, "varid: %hd\n", G_col.varid);
+                                fprintf(stderr, "id   : %s\n", G_col.id);
+                                fprintf(stderr, "tabid: %s\n", G_col.tabid);
+                                fprintf(stderr, "name : %s\n", G_col.name);
+                                fprintf(stderr, "type : %s\n", G_col.datatype);
+                              }
                               (void)insert_column(&G_col);
+                              memset(&G_col, 0, sizeof(TABCOLUMN_T));
                               break;
                          case STATUS_FK:
+                              if (G_debug) {
+                                fprintf(stderr, "Inserting FK:\n");
+                                fprintf(stderr, "varid: [%hd]\n", G_fk.varid);
+                                fprintf(stderr, "id   : [%s]\n", G_fk.id);
+                                fprintf(stderr, "name : [%s]\n", G_fk.name);
+                                fprintf(stderr, "tabid: [%s]\n",
+                                                G_fk.tabid);
+                                fprintf(stderr, "reftabid : [%s]\n",
+                                                G_fk.reftabid);
+                              }
                               (void)insert_foreignkey(&G_fk, fkcol_list);
+                              memset(&G_fk, 0, sizeof(TABFOREIGNKEY_T));
                               free_colfk(&fkcol_list);
                               break;
                          case STATUS_IDX:
+                              if (G_debug) {
+                                fprintf(stderr, "Inserting index (1):\n");
+                                fprintf(stderr, "id   : %s\n", G_idx.id);
+                                fprintf(stderr, "name : %s\n", G_idx.name);
+                                fprintf(stderr, "tabid: %s\n", G_idx.tabid);
+                              }
                               (void)insert_index(&G_idx);
+                              memset(&G_idx, 0, sizeof(TABINDEX_T));
                               break;
                          case STATUS_ICO:
+                              if (G_debug) {
+                                fprintf(stderr, "Inserting index (2):\n");
+                                fprintf(stderr, "id   : %s\n", G_idx.id);
+                                fprintf(stderr, "name : %s\n", G_idx.name);
+                                fprintf(stderr, "tabid: %s\n", G_idx.tabid);
+                              }
+                              (void)insert_index(&G_idx);
+                              // DON'T reinit the structure
+                              strncpy(G_idxcol.tabid, G_idx.tabid, ID_LEN);
+                              if (G_debug) {
+                                fprintf(stderr, "Inserting index column:\n");
+                                fprintf(stderr, "tabid: %s\n", G_idxcol.tabid);
+                                fprintf(stderr, "index: %s\n", G_idxcol.idxid);
+                                fprintf(stderr, "col  : %s\n", G_idxcol.colid);
+                              }
                               (void)insert_indexcol(&G_idxcol);
+                              memset(&G_idxcol, 0, sizeof(TABINDEXCOL_T));
                               break;
                          case STATUS_TAB:
+                              if (G_debug) {
+                                fprintf(stderr, "Inserting table:\n");
+                                fprintf(stderr, "varid: %hd\n", G_tab.varid);
+                                fprintf(stderr, "id   : %s\n", G_tab.id);
+                                fprintf(stderr, "name : %s\n", G_tab.name);
+                              }
                               (void)insert_table(&G_tab);
+                              memset(&G_tab, 0, sizeof(TABTABLE_T));
                               break;
                          default:
                               break;
@@ -424,6 +507,9 @@ static int streamXML(xmlTextReaderPtr reader) {
 #endif
                    break;
               case XMLTEXT:
+                   //if (G_debug) {
+                   //  fprintf(stderr, "XMLTEXT\n");
+                   //}
 #ifndef SETUP
                    if ((G_status[G_lvl].cat != STATUS_UNK)
                        && (getCatKey != SYNTH_NOT_FOUND)) {
@@ -485,6 +571,10 @@ static int streamXML(xmlTextReaderPtr reader) {
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_NAME:
                             strncpy(G_fk.name, (char *)val, NAME_LEN);
+                            if (G_debug) {
+                              fprintf(stderr, "xml - found foreign key name %s\n",
+                                              G_fk.name);
+                            }
                             break;
                        case SYNTH_TABLE_INDEX_INDEXCOLUMN_COLUMN_REFERENCEDCOLUMN:
                             strncpy(G_idxcol.colid, (char *)val, ID_LEN);
@@ -506,9 +596,17 @@ static int streamXML(xmlTextReaderPtr reader) {
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_COLUMNS:
                             add_colfk(&fkcol_list, (char *)val);
+                            if (G_debug) {
+                              fprintf(stderr, "xml - found foreign key column %s\n",
+                                              (char *)val);
+                            }
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_REFERENCEDCOLUMNS:
                             add_refcolfk(&fkcol_list, (char *)val);
+                            if (G_debug) {
+                              fprintf(stderr, "xml - found foreign key ref column %s\n",
+                                              (char *)val);
+                            }
                             break;
                        case SYNTH_TABLE_INDICES:
                             break;
@@ -521,21 +619,21 @@ static int streamXML(xmlTextReaderPtr reader) {
                        default:
                             break;
                      }
-                     if (G_debug) {
-                       if (synth_keyword(getCatKey)) {
-                         printf("%s [%s] %s = %s",
-                              G_category[cat],
-                              synth_keyword(getCatKey),
-                              G_tags_head->name,
-                              (char *)val);
-                       } else {
-                         printf("%s [%d] %s = %s",
-                              G_category[cat],
-                              getCatKey,
-                              G_tags_head->name,
-                              (char *)val);
-                       }
-                     }
+                     //if (G_debug) {
+                     //  if (synth_keyword(getCatKey)) {
+                     //    fprintf(stderr, "%s [%s] %s = %s",
+                     //         G_category[cat],
+                     //         synth_keyword(getCatKey),
+                     //         G_tags_head->name,
+                     //         (char *)val);
+                     //  } else {
+                     //    fprintf(stderr, "%s [%d] %s = %s",
+                     //         G_category[cat],
+                     //         getCatKey,
+                     //         G_tags_head->name,
+                     //         (char *)val);
+                     //  }
+                     //}
                    }
 #endif
                    break;
