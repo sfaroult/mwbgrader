@@ -25,6 +25,8 @@ static void usage(char *prog) {
             "   -c <fname> : use grading configuration found in <fname>\n");
     fprintf(stderr,
            "                 instead of using grading.conf if it exists.\n");
+    fprintf(stderr,
+            "   -r         : report on issues found and explain grading.\n");
 }
 
 int main(int argc, char **argv) {
