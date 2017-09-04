@@ -1,10 +1,11 @@
 CFLAGS=-I/usr/local/opt/libxml2/include/libxml2 \
 	   -I./include -Wall
 OBJ=obj/mwbkey.o obj/dbop.o obj/synth.o obj/catpath.o obj/kwsearch.o \
-	obj/schema.o obj/grad.o obj/grading.o obj/levenshtein.o obj/debug.o
-LIBS=-lxml2 -lsqlite3
+	obj/schema.o obj/grad.o obj/grading.o obj/levenshtein.o obj/debug.o \
+	obj/strbuf.o obj/sql_lev.o obj/sql_sqrt.o
+LIBS=-lxml2 -lsqlite3 -lm
 
-all: mwbgrader scanxml scansetup
+all: mwbgrader
 
 mwbgrader: obj/mwbgrader.o obj/miniz.o obj/scanxml.o $(OBJ)
 	gcc -o $@ obj/mwbgrader.o obj/miniz.o obj/scanxml.o $(OBJ) $(LIBS)
@@ -18,22 +19,12 @@ obj/miniz.o: src/miniz.c
 obj/debug.o: src/debug.c
 	gcc -c $(CFLAGS) -o $@ $<
 
-scanxml: obj/scanxml_sa.o $(OBJ)
-	gcc -o $@ obj/scanxml_sa.o $(OBJ) $(LIBS)
-
-scansetup: obj/scansetup.o $(OBJ)
-	gcc -o $@ obj/scansetup.o $(OBJ) $(LIBS)
-
-obj/scanxml_sa.o: src/scanxml.c include/mwbkey.h include/synth.h \
-   	include/catpath.h
-	gcc -c $(CFLAGS) -D STANDALONE -o $@ $<
+obj/strbuf.o: src/strbuf.c
+	gcc -c $(CFLAGS) -o $@ $<
 
 obj/scanxml.o: src/scanxml.c include/mwbkey.h include/synth.h \
    	include/catpath.h
 	gcc -c $(CFLAGS) -o $@ $<
-
-obj/scansetup.o: src/scanxml.c
-	gcc -c -D SETUP -D STANDALONE $(CFLAGS) -o $@ $<
 
 obj/mwbkey.o: src/mwbkey.c
 	gcc -c $(CFLAGS) -o $@ $<
@@ -62,6 +53,12 @@ obj/dbop.o: src/dbop.c
 obj/levenshtein.o: src/levenshtein.c
 	gcc -c $(CFLAGS) -o $@ $<
 
+obj/sql_sqrt.o: src/sql_sqrt.c
+	gcc -c $(CFLAGS) -o $@ $<
+
+obj/sql_lev.o: src/sql_lev.c
+	gcc -c $(CFLAGS) -o $@ $<
+
 clean:
-	-rm mwbgrader scanxml scansetup
+	-rm mwbgrader
 	-rm obj/*

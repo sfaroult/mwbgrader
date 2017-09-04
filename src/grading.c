@@ -6,6 +6,7 @@
 #include "grad.h"
 #include "dbop.h"
 #include "debug.h"
+#include "grading.h"
 
 
 #define LINE_LEN   250
@@ -38,6 +39,7 @@ typedef struct {
           short check_code;
           char *description;
           char *sql;
+          char *sql2; // When there is a reference model
           short rule;
           float threshold;
           float val;
@@ -51,9 +53,12 @@ extern int levenshtein(char *s1, char *s2);
 // grading.conf can change the rules
 
 static short     G_chain_start = -1;
+static short     G_model_weight = MODEL_WEIGHT;
 // Default control sequence
 static short     G_grading_seq[GRAD_COUNT] =
                   {GRAD_START_GRADE,
+                   GRAD_NUMBER_OF_TABLES,
+                   GRAD_NUMBER_OF_INFO_PIECES,
                    GRAD_NO_PK,
                    GRAD_EVERYTHING_NULLABLE,
                    GRAD_NO_UNIQUENESS,
@@ -83,8 +88,51 @@ static GRADING_T G_grading[] =
               " group by t.name"
               " having max(c.IsNotNull)='0'"
               " order by 1",
+              "select count(*)"
+              " from tabTable t"
+              "      join tabColumn c"
+              "        on c.tabid=t.id"
+              " where c.autoinc='0'"
+              " and t.varid=?1"
+              " group by t.name"
+              " having max(c.IsNotNull)='0'",
               SUB_EACH,
               0,
+              5.0,
+              -1},
+             {GRAD_NUMBER_OF_TABLES,
+              "Required number of tables in the schema",
+              "select count(*) from tabTable",
+              "select count(*) from tabTable where varid=?1",
+              SUB_ONCE | AT_LEAST,
+              4,
+              15.0,
+              -1},
+             {GRAD_NUMBER_OF_INFO_PIECES,
+              "Required number of information pieces in the schema",
+              "select count(*)"
+              " from tabColumn c"
+              " left outer join tabForeignKey fk"
+              " on fk.tabid=c.tabid"
+              " left outer join tabFKcol as fkc"
+              " on fkc.fkid=fk.id"
+              " and fkc.colid=c.id"
+              " where c.autoInc=0"
+              " and fkc.colid is null",
+              "select count(*)"
+              " from tabColumn c"
+              " join tabTable t"
+              " on t.id=c.tabid"
+              " left outer join tabForeignKey fk"
+              " on fk.tabid=c.tabid"
+              " left outer join tabFKcol as fkc"
+              " on fkc.fkid=fk.id"
+              " and fkc.colid=c.id"
+              " where c.autoInc=0"
+              " and t.varid=?1"
+              " and fkc.colid is null",
+              SUB_ONCE | AT_LEAST,
+              10,
               5.0,
               -1},
              {GRAD_ISOLATED_TABLES,
@@ -103,6 +151,20 @@ static GRADING_T G_grading[] =
               " on y.tabid=t.id"
               " where y.tabid is null"
               " order by 1",
+              "select count(*)"
+              " from tabTable t"
+              "  left outer join"
+              "  (select distinct"
+              "     case x.n"
+              "       when 1 then fk.tabid"
+              "       when 2 then fk.reftabid"
+              "     end as tabid"
+              " from tabForeignKey fk"
+              "   cross join (select 1 as n"
+              "    union select 2) x) y"
+              " on y.tabid=t.id"
+              " where y.tabid is null"
+              " and t.varid=?1",
               SUB_EACH,
               0,
               3.0,
@@ -121,6 +183,17 @@ static GRADING_T G_grading[] =
               " join tabTable t2"
               "  on t2.id=x.reftabid"
               " order by 1",
+              "select count(*)"
+              " from (select tabid,reftabid,count(*) cnt"
+              "  from tabForeignKey"
+              "  group by tabid,reftabid"
+              " having count(*)>2) x"
+              " join tabTable t1"
+              "  on t1.id=x.tabid"
+              " join tabTable t2"
+              "  on t2.id=x.reftabid"
+              " where t1.varid=?1"
+              " and t2.varid=t1.varid",
               SUB_EACH,
               0,
               1.5,
@@ -134,6 +207,14 @@ static GRADING_T G_grading[] =
               " group by t.name"
               " having count(c.id)=1"
               " order by 1",
+              "select count(*)"
+              " from(select t.name"
+              "  from tabTable t"
+              "   join tabColumn c"
+              "   on c.tabid=t.id"
+              "  where t.varid=?1"
+              "  group by t.name"
+              "  having count(c.id)=1) x",
               SUB_EACH,
               0,
               3.5,
@@ -150,6 +231,20 @@ static GRADING_T G_grading[] =
               " idxid"
               " from tabIndexCol"
               " group by idxid) x",
+              "select round(100*cast(sum(single_col_idx) as float)"
+              " / count(*)) as pct_one_col"
+              " from (select case max(ic.seq)"
+              "   when 1 then 1"
+              "   else 0"
+              " end as single_col_idx,"
+              " ic.idxid"
+              " from tabIndexCol ic"
+              "  join tabIndex i"
+              "  on i.id=ic.idxid"
+              "  join tabTable t"
+              "  on t.id=i.tabid"
+              " where t.varid=?1"
+              " group by  ic.idxid) x",
               SUB_ONCE | AT_MOST,
               99,
               5.0,
@@ -162,6 +257,14 @@ static GRADING_T G_grading[] =
               " where datatype='varchar'"
               " group by datatype"
               " having count(distinct collength) = 1",
+              "select 1"
+              " from tabColumn c"
+              " join tabTable t"
+              " on t.id=c.tabid"
+              " where c.datatype='varchar'"
+              " and t.varid=?1"
+              " group by c.datatype"
+              " having count(distinct c.collength) = 1",
               SUB_ONCE,
               0,
               5.0,
@@ -182,6 +285,18 @@ static GRADING_T G_grading[] =
               " on t.id=x.tabid"
               " where datatype='varchar'"
               " order by 1",
+              "select count(*)"
+              " from (select tabid,max(datatype) datatype,"
+              "max(collength) collength"
+              " from tabColumn"
+              " where autoinc=0"
+              " group by tabid"
+              " having count(*)>1"
+              " and count(distinct datatype||cast(collength as char))=1) x"
+              " join tabTable t"
+              " on t.id=x.tabid"
+              " where x.datatype='varchar'"
+              " and t.varid=?1",
               SUB_ONCE,
               0,
               3.5,
@@ -207,6 +322,24 @@ static GRADING_T G_grading[] =
               " join tabTable t"
               " on t.id=i2.tabid"
               " order by 1",
+              "select count(*)" 
+              " from (select i.name redundant_idx,"
+              " i.tabid,i.id as idxid,max(ic.colid) as colid"
+              " from tabIndex i"
+              " join tabIndexCol ic"
+              " on ic.idxid=i.id"
+              " group by i.name,i.tabid,i.id"
+              " having max(ic.seq)=1) one_col"
+              " join tabIndex i2"
+              " on i2.tabid=one_col.tabid"
+              " and i2.id<>one_col.idxid"
+              " join tabIndexCol ic2"
+              " on ic2.idxid=i2.id"
+              " and ic2.colid=one_col.colid"
+              " and ic2.seq=1"
+              " join tabTable t"
+              " on t.id=i2.tabid"
+              " where t.varid=?1",
               SUB_EACH,
               0,
               2.0,
@@ -222,6 +355,7 @@ static GRADING_T G_grading[] =
               " on has_pk.tabid=t.id"
               " where has_pk.tabid is null"
               " order by 1",
+              NULL,
               SUB_EACH,
               0,
               10.0,
@@ -281,6 +415,55 @@ static GRADING_T G_grading[] =
               " join tabTable t2"
               " on t2.id=one2one.reftabid"
               " order by 1",
+              "select count(*)"
+              " from (select xx.tabid,xx.reftabid"
+              "  from (select i.tabid,fk.reftabid"
+              "  from tabIndex i"
+              "   join tabIndexCol ic"
+              "    on ic.idxid=i.id"
+              "  left outer join tabForeignKey fk"
+              "    on fk.tabid=i.tabid"
+              "   and fk.tabid<>fk.reftabid"
+              "  left outer join tabFkcol fkc"
+              "    on fkc.fkid=fk.id"
+              "   and ic.colid=fkc.colid"
+              " where (i.isPrimary=1 or i.isUnique=1)"
+              " group by i.tabid,fk.reftabid,fk.id,i.id"
+              " having count(ic.colid)=count(fkc.colid)) xx"
+              // Exclude what could reasonably look like inheritance
+              " left outer join"
+              " (select y.reftabid as parent_table,"
+              "   ','||group_concat(y.tabid)||',' as child_tables"
+              " from (select tabid,pkcols,fkcols,fkid,reftabid"
+              "  from (select pk.tabid,count(*) as pkcols,"
+              "   sum(case"
+              "    when fkc.colid is null then 0"
+              "    else 1"
+              "    end) as fkcols,fk.id as fkid,fk.reftabid"
+              " from tabIndex pk"
+              "  join tabIndexCol pkc"
+              "  on pkc.idxid=pk.id"
+              "  left outer join tabForeignKey fk"
+              "  on fk.tabid=pk.tabid"
+              "  and fk.tabid<>fk.reftabid"
+              "  left outer join tabFkcol fkc"
+              "  on fkc.fkid=fk.id"
+              "  and pkc.colid=fkc.colid"
+              " where pk.isPrimary=1"
+              " group by pk.tabid,fk.id,fk.reftabid) x"
+              // All the PK columns are in a single FK
+              " where pkcols=fkcols) y"
+              " group by y.reftabid"
+              " having count(*)>1) zz"
+              " on zz.parent_table=xx.reftabid"
+              " and zz.child_tables like '%,'||xx.tabid||',%'"
+              " where zz.parent_table is null) one2one"
+              " join tabTable t1"
+              " on t1.id=one2one.tabid"
+              " join tabTable t2"
+              " on t2.id=one2one.reftabid"
+              " where t1.varid=?1"
+              " and t2.varid=t1.varid",
               SUB_EACH,
               0,
               3.0,
@@ -309,6 +492,7 @@ static GRADING_T G_grading[] =
               " on y.tabid=t.id"
               " where y.tabid is null"
               " order by 1",
+              NULL,
               SUB_EACH,
               0,
               4.0,
@@ -318,6 +502,10 @@ static GRADING_T G_grading[] =
               "select round(100.0*sum(case comment_len when 0"
               " then 0 else 1 end)/count(*)) ptc_commented"
               " from tabTable",
+              "select round(100.0*sum(case comment_len when 0"
+              " then 0 else 1 end)/count(*)) ptc_commented"
+              " from tabTable"
+              " where varid=?1",
               SUB_ONCE | AT_LEAST,
               50,
               5.0,
@@ -336,9 +524,23 @@ static GRADING_T G_grading[] =
               " on fk.tabid=ut.tabid"
               " group by ut.tabid"
               " having count(*)>2) x"
-              " join tabtable t"
+              " join tabTable t"
               " on t.id=x.tabid"
               " order by 1",
+              "select count(*)"
+              " from (select ut.tabid,count(*) as legs"
+              " from (select t.id as tabid"
+              "  from tabTable t"
+              "  left outer join tabForeignKey fk"
+              "   on fk.reftabid=t.id"
+              " where fk.id is null) ut" // Unreferenced tables
+              " join tabForeignKey fk"
+              " on fk.tabid=ut.tabid"
+              " group by ut.tabid"
+              " having count(*)>2) x"
+              " join tabTable t"
+              " on t.id=x.tabid"
+              " where t.varid=?1",
               SUB_EACH,
               0,
               2.5,
@@ -348,6 +550,12 @@ static GRADING_T G_grading[] =
               "select round(100.0*sum(case comment_len when 0"
               " then 0 else 1 end)/count(*)) ptc_commented"
               " from tabColumn",
+              "select round(100.0*sum(case c.comment_len when 0"
+              " then 0 else 1 end)/count(*)) ptc_commented"
+              " from tabColumn c"
+              " join tabTable t"
+              " on t.id=c.tabid"
+              " where t.varid=?1",
               SUB_ONCE | AT_LEAST,
               10,
               5.0,
@@ -370,12 +578,14 @@ static GRADING_T G_grading[] =
               " limit 5000) x"
               " group by id"
               " having count(*) > 100",
+              NULL,
               SUB_ONCE,
               0,
               10.0,
               -1},
              {GRAD_START_GRADE,
               "Initial grade from which the final grade is computed",
+              NULL,
               NULL,
               ASSIGN,
               0,
@@ -394,6 +604,21 @@ static GRADING_T G_grading[] =
               "   group by tabid"
               "   having count(*)>3))" // Eliminate label tables
               " order by 1",
+              "select count(*)"
+              " from tabTable t"
+              " join tabColumn c"
+              " on c.tabid=t.id"
+              " where t.varid=?1"
+              " group by t.name"
+              " having count(c.id)>(select 3*sum(cols)/count(tabid)"
+              "  from (select c.tabid,count(*) as cols"
+              "   from tabColumn c"
+              "    join tabTable t"
+              "    on t.id=c.tabid"
+              "   where t.varid=?1"
+              "   group by c.tabid"
+              "   having count(*)>3))" // Eliminate label tables
+              " order by 1",
               SUB_EACH,
               0,
               1.0,
@@ -407,6 +632,17 @@ static GRADING_T G_grading[] =
               " left outer join tabForeignKey fk"
               " on fk.reftabid=t.id"
               " where fk.id is null) ut" // Unreferenced tables
+              " join tabColumn c"
+              " on c.tabid=ut.tabid"
+              " and c.autoinc=1"
+              " order by 1",
+              "select count(*)"
+              " from (select t.name,t.id as tabid"
+              " from tabTable t"
+              " left outer join tabForeignKey fk"
+              " on fk.reftabid=t.id"
+              " where fk.id is null"
+              "  and t.varid=?1) ut" // Unreferenced tables
               " join tabColumn c"
               " on c.tabid=ut.tabid"
               " and c.autoinc=1"
@@ -428,6 +664,7 @@ static void grading_info(GRADING_T *g) {
          printf(" %s\n", g->description);
        }
        printf(" %-50.50s...\n", g->sql);
+       printf(" %-50.50s...\n", g->sql2);
        printf(" rule      = %hd\n", g->rule);
        printf(" threshold = %f\n", g->threshold);
        printf(" val       = %f\n", g->val);
@@ -520,7 +757,7 @@ extern void read_grading(char *grading_file) {
     // First finish setting up the default values
     if (G_grading_seq[0] != GRAD_START_GRADE) {
       fprintf(stderr, "Incorrectly set default grading scheme "
-                      "(first code must be GRAD_START_GRADE)\n");
+                      "(first code must be START_GRADE)\n");
       exit(1);
     }
     grading_options = sizeof(G_grading)/sizeof(GRADING_T);
@@ -616,10 +853,12 @@ extern void read_grading(char *grading_file) {
               switch (*q) {
                 case '<':
                 case '>':
-                     if (strncmp(grad_keyword(gcode), "percent_", 8)) {
+                     if (strncmp(grad_keyword(gcode), "percent_", 8)
+                         && strncmp(grad_keyword(gcode), "number_", 7)) {
                        fprintf(stderr,
                             "Threshold value only valid with"
-                            " queries that return a percentage line %d\n",
+                            " queries that return a percentage"
+                            " or a number, line %d\n",
                             linenum);
                        ok = 0;
                      } else { 
@@ -645,7 +884,8 @@ extern void read_grading(char *grading_file) {
                      }
                      break;
                 default :
-                     if (strncmp(grad_keyword(gcode), "percent_", 8)) {
+                     if ((strncmp(grad_keyword(gcode), "percent_", 8) == 0) 
+                        || (strncmp(grad_keyword(gcode), "number_", 7) == 0)) {
                        fprintf(stderr,
                                 "Threshold (>[value] or <[value])"
                                  " expected with %s line %d\n",
@@ -681,10 +921,10 @@ extern void show_grading(void) {
     printf("# formula is a simple assignment. Otherwise, the formula is\n");
     printf("# an operator (+,-,*,/) followed by the value applied to\n");
     printf("# the grade. If the operator is repeated, the operation\n");
-    printf("# is applied for every occurence.\n");
-    printf("# Rules the name of which starts with \"percent\" take\n");
-    printf("# a comparator (< or >) followed by a threshold value between\n");
-    printf ("# square brackets before the formula proper.\n");
+    printf("# is applied for every occurrence.\n");
+    printf("# Rules the name of which starts with \"percent\" or \"number\"\n");
+    printf("# take a comparator (< or >) followed by a threshold value\n");
+    printf("# between square brackets before the formula proper.\n");
     printf("# \n");
 
     while (i != -1) {
@@ -693,9 +933,9 @@ extern void show_grading(void) {
           printf("# %s\n", G_grading[i].description);
         }
         if (G_grading[i].rule & AT_LEAST) {
-          printf("# when percentage is smaller than threshold\n");
+          printf("# when value is smaller than threshold\n");
         } else if (G_grading[i].rule & AT_MOST) {
-          printf("# when percentage is greater than threshold\n");
+          printf("# when value is greater than threshold\n");
         }
         switch(rule) {
           case MULT_EACH:
@@ -703,24 +943,33 @@ extern void show_grading(void) {
                        G_grading[i].val);
                break;
           case MULT_ONCE:
-               printf("# multiply grade by %.1f if it happens\n",
-                       G_grading[i].val);
+               printf("# multiply grade by %.1f%s\n",
+                       G_grading[i].val,
+                       ((G_grading[i].rule & AT_LEAST)
+                        || (G_grading[i].rule & AT_LEAST)) ? 
+                       "" : " if it happens");
                break;
           case SUB_EACH:
                printf("# subtract %d from grade for each occurrence\n",
                       (int)G_grading[i].val);
                break;
           case SUB_ONCE:
-               printf("# subtract %d from grade if it happens\n",
-                      (int)G_grading[i].val);
+               printf("# subtract %d from grade%s\n",
+                      (int)G_grading[i].val,
+                       ((G_grading[i].rule & AT_LEAST)
+                        || (G_grading[i].rule & AT_LEAST)) ? 
+                       "" : " if it happens");
                break;
           case ADD_EACH:
                printf("# add %d to grade for each occurrence\n",
                       (int)G_grading[i].val);
                break;
           case ADD_ONCE:
-               printf("# add %d to grade if it happens\n",
-                      (int)G_grading[i].val);
+               printf("# add %d to grade%s\n",
+                       (int)G_grading[i].val,
+                       ((G_grading[i].rule & AT_LEAST)
+                        || (G_grading[i].rule & AT_LEAST)) ? 
+                       "" : " if it happens");
                break;
           default:
                break;
@@ -764,60 +1013,96 @@ extern void show_grading(void) {
     }
 }
 
-extern int grade(char report) {
+extern void set_model_weight(short val) {
+   if ((val >= 0) && (val <= 100)) {
+     G_model_weight = val;
+   }
+}
+
+extern int grade(char report, short refvar, float max_grade) {
     short       i = G_chain_start;
     short       rule;
     float       prev_grade = 0;
     float       work_grade = 0;
+    float       model_closeness_grade = 0;
     int         query_result;
     short       k;
     short       rule_cnt = 0;
     char        no_grading = 0;
     OVERVIEW_T  overview;
+    short       checks[GRAD_COUNT];
 
     // Get the start grade
-    if (i < 0) {
-      i = 0;
-      no_grading = 1;
-    }
-    if (G_grading[i].check_code != GRAD_START_GRADE) {
-      fprintf(stderr, "Unknown starting grade\n");
-      if (debugging()) {
-        printf("i = %d (chain start = %d)\n", i, G_chain_start);
-        grading_info(&(G_grading[i]));
-      } 
-      no_grading = 1;
+    if (max_grade <= 0) {
+      if (i < 0) {
+        i = 0;
+        no_grading = 1;
+      }
+      if (G_grading[i].check_code != GRAD_START_GRADE) {
+        fprintf(stderr, "Unknown starting grade\n");
+        if (debugging()) {
+          printf("i = %d (chain start = %d)\n", i, G_chain_start);
+          grading_info(&(G_grading[i]));
+        } 
+        no_grading = 1;
+      } else {
+        work_grade = G_grading[i].val;
+      }
     } else {
-      work_grade = G_grading[i].val;
+      work_grade = max_grade;
     }
     (void)memset(&overview, 0, sizeof(OVERVIEW_T));
-    // Get overview info
-    (void)db_basic_info(&(overview.tabcnt), &(overview.datacnt));
-    overview.rel = db_relationships();
-    overview.selfref = db_selfref();
-    if (report) {
-      RELATIONSHIP_T *r;
-      NAME_ITEM_T    *n;
-      printf("%d tables in the schema and %d pieces of information.\n",
-             overview.tabcnt, overview.datacnt);
-      if ((r = overview.rel) != NULL) {
-        printf("Relationships:\n");
-        do { 
-           printf("\t%s\t[%s]\t%s\n", r->tab1, r->cardinality, r->tab2);
-        } while ((r = r->next) != NULL);
-      } else {
-        printf("-- No relationships\n");
+    if (refvar <= 0) {
+      G_model_weight = 0;
+      // Not required if there is a reference model
+      // Get overview info
+      (void)db_basic_info(&(overview.tabcnt), &(overview.datacnt));
+      overview.rel = db_relationships();
+      overview.selfref = db_selfref();
+      if (report) {
+        RELATIONSHIP_T *r;
+        NAME_ITEM_T    *n;
+        printf("%d tables in the schema and %d pieces of information.\n",
+               overview.tabcnt, overview.datacnt);
+        if ((r = overview.rel) != NULL) {
+          printf("Relationships:\n");
+          do { 
+             printf("\t%s\t[%s]\t%s\n", r->tab1, r->cardinality, r->tab2);
+          } while ((r = r->next) != NULL);
+        } else {
+          printf("-- No relationships\n");
+        }
+        if ((n = overview.selfref) != NULL) {
+          printf("Tables with self references:\n");
+          do { 
+            printf("\t%s\n", n->name);
+          } while ((n = n->next) != NULL);
+        } else {
+          printf("-- No self-referencing tables\n");
+        }
       }
-      if ((n = overview.selfref) != NULL) {
-        printf("Tables with self references:\n");
-        do { 
-           printf("\t%s\n", n->name);
-        } while ((n = n->next) != NULL);
-      } else {
-        printf("-- No self-referencing tables\n");
+    } else {
+      // Start from the distance between the model and the submission
+      // Affects a user-defined portion of the grade (70% by default) 
+      model_closeness_grade = schema_matching(refvar);
+      if (report) {
+        printf("Closeness to an expected model: %.0f%%\n",
+               model_closeness_grade);
       }
     }
     prev_grade = work_grade;
+    if (report) {
+      printf("Starting grade before controls: %.0f%%\n", work_grade);
+    }
+    if (refvar > 0) {
+      // We'll only check what the variant references passes
+      get_variant_tests(refvar, checks, GRAD_COUNT);
+    } else {
+      int k;
+      for (k = 0; k < GRAD_COUNT; k++) {
+        checks[k] = 1;
+      }
+    }
     while (i != -1) {
       if (debugging()) { 
         printf("i = %hd\n", i);
@@ -827,7 +1112,7 @@ extern int grade(char report) {
       if (!no_grading && (rule != NO_RULE)) {
         rule_cnt++;
       }
-      if (G_grading[i].sql) {
+      if (G_grading[i].sql && checks[G_grading[i].check_code]) {
         if (report && G_grading[i].description) {
           printf("%s\n", G_grading[i].description);
         }
@@ -836,69 +1121,90 @@ extern int grade(char report) {
         query_result = db_runcheck(G_grading[i].check_code,
                                    report,
                                    G_grading[i].sql,
-                                   NULL);
+                                   refvar);
         if (G_grading[i].rule & AT_MOST) {
           query_result = (query_result > G_grading[i].threshold ? 1 : 0);
+          if (report) {
+            if (query_result) {
+              printf("\tgreater than limit %d\n", (int)G_grading[i].threshold);
+            } else {
+              printf("\t*** OK (<= %d)\n", (int)G_grading[i].threshold);
+            }
+          }
         } else if (G_grading[i].rule & AT_LEAST) {
           query_result = (query_result < G_grading[i].threshold ? 1 : 0);
+          if (report) {
+            if (query_result) {
+              printf("\tlesser than limit %d\n", (int)G_grading[i].threshold);
+            } else {
+              printf("\t*** OK (>= %d)\n", (int)G_grading[i].threshold);
+            }
+          }
+        }
+        if (G_grading[i].val) {
+          switch(rule) {
+            case MULT_EACH:
+                 for (k = 0; k < query_result; k++) {
+                   work_grade *= G_grading[i].val;
+                 }
+                 if (report && !no_grading && (prev_grade != work_grade)) {
+                   printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                                 (int)(work_grade+0.5));
+                 }
+                 break;
+            case MULT_ONCE:
+                 if (query_result) {
+                   work_grade *= G_grading[i].val;
+                 }
+                 if (report && !no_grading && (prev_grade != work_grade)) {
+                   printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                                 (int)(work_grade+0.5));
+                 }
+                 break;
+            case SUB_EACH:
+                 work_grade -= (query_result * G_grading[i].val);
+                 if (report && !no_grading && (prev_grade != work_grade)) {
+                   printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                                 (int)(work_grade+0.5));
+                 }
+                 break;
+            case SUB_ONCE:
+                 if (query_result) {
+                   work_grade -= G_grading[i].val;
+                 }
+                 if (report && !no_grading && (prev_grade != work_grade)) {
+                   printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                                 (int)(work_grade+0.5));
+                 }
+                 break;
+            case ADD_EACH:
+                 work_grade += (query_result * G_grading[i].val);
+                 if (report && !no_grading && (prev_grade != work_grade)) {
+                   printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                                 (int)(work_grade+0.5));
+                 }
+                 break;
+            case ADD_ONCE:
+                 if (query_result) {
+                   work_grade += G_grading[i].val;
+                 }
+                 if (report && !no_grading && (prev_grade != work_grade)) {
+                   printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
+                                                 (int)(work_grade+0.5));
+                 }
+                 break;
+            default:
+                 break;
+          } 
+        } 
+      } else {
+        if (debugging()) {
+          if (G_grading[i].sql) {
+            fprintf(stderr, "=> %s\n", G_grading[i].description);
+            fprintf(stderr, "Check failed by reference model - unchecked\n");
+          } 
         }
       }
-      if (G_grading[i].val) {
-        switch(rule) {
-          case MULT_EACH:
-               for (k = 0; k < query_result; k++) {
-                 work_grade *= G_grading[i].val;
-               }
-               if (report && !no_grading && (prev_grade != work_grade)) {
-                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
-                                               (int)(work_grade+0.5));
-               }
-               break;
-          case MULT_ONCE:
-               if (query_result) {
-                 work_grade *= G_grading[i].val;
-               }
-               if (report && !no_grading && (prev_grade != work_grade)) {
-                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
-                                               (int)(work_grade+0.5));
-               }
-               break;
-          case SUB_EACH:
-               work_grade -= (query_result * G_grading[i].val);
-               if (report && !no_grading && (prev_grade != work_grade)) {
-                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
-                                               (int)(work_grade+0.5));
-               }
-               break;
-          case SUB_ONCE:
-               if (query_result) {
-                 work_grade -= G_grading[i].val;
-               }
-               if (report && !no_grading && (prev_grade != work_grade)) {
-                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
-                                               (int)(work_grade+0.5));
-               }
-               break;
-          case ADD_EACH:
-               work_grade += (query_result * G_grading[i].val);
-               if (report && !no_grading && (prev_grade != work_grade)) {
-                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
-                                               (int)(work_grade+0.5));
-               }
-               break;
-          case ADD_ONCE:
-               if (query_result) {
-                 work_grade += G_grading[i].val;
-               }
-               if (report && !no_grading && (prev_grade != work_grade)) {
-                 printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
-                                               (int)(work_grade+0.5));
-               }
-               break;
-          default:
-               break;
-        } 
-      } 
       i = G_grading[i].next;
       prev_grade = work_grade;
     }
@@ -916,7 +1222,56 @@ extern int grade(char report) {
           work_grade = 0;
         }
       }
+      if (G_model_weight) {
+        if (report) {
+          printf("Final grade computed as %hd%% closeness to model (%.0f%%)\n",
+                  G_model_weight, model_closeness_grade);
+          printf("and %hd%% other controls (%.0f%%).\n",
+                  (short)(100 - G_model_weight), (work_grade + 0.5));
+        }
+        work_grade *= (1 - (float)G_model_weight/100.0);
+        work_grade += ((G_model_weight/100.0) * model_closeness_grade);
+      }
       return (int)(work_grade + 0.5);
     }
     return -1;
+}
+
+extern void graderef(short refvar) {
+    short       i = G_chain_start;
+    short       rule;
+    int         query_result;
+    char        pass;
+
+    while (i != -1) {
+      if (debugging()) { 
+        printf("REF i = %hd\n", i);
+        grading_info(&(G_grading[i]));
+      }
+      rule = G_grading[i].rule & ~AT_MOST & ~AT_LEAST;
+      if (G_grading[i].sql2) {
+        query_result = db_refcheck(G_grading[i].check_code,
+                                   G_grading[i].sql2,
+                                   refvar);
+        if (G_grading[i].rule & AT_MOST) {
+          query_result = (query_result > G_grading[i].threshold ? 1 : 0);
+          if (query_result) { // Reference fails the test
+            pass = 0;
+          } else {
+            pass = 1;
+          }
+        } else if (G_grading[i].rule & AT_LEAST) {
+          query_result = (query_result < G_grading[i].threshold ? 1 : 0);
+          if (query_result) { // Reference fails the test
+            pass = 0;
+          } else {
+            pass = 1;
+          }
+        } else {
+          pass = (query_result == 0);
+        }
+      }
+      (void)insert_variant_test(refvar, (int)G_grading[i].check_code, pass);
+      i = G_grading[i].next;
+    }
 }

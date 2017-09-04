@@ -84,12 +84,17 @@ static void show_tag(char exiting, char *tag) {
    }
 }
 
-static void init_struct(void) {
+static void init_struct(short variant) {
     memset(&G_tab, 0, sizeof(TABTABLE_T));
+    G_tab.varid = variant;
     memset(&G_col, 0, sizeof(TABCOLUMN_T));
+    G_col.varid = variant;
     memset(&G_idx, 0, sizeof(TABINDEX_T));
+    G_idx.varid = variant;
     memset(&G_idxcol, 0, sizeof(TABINDEXCOL_T));
+    G_idxcol.varid = variant;
     memset(&G_fk, 0, sizeof(TABFOREIGNKEY_T));
+    G_fk.varid = variant;
 }
 
 #ifdef LIBXML_READER_ENABLED
@@ -345,7 +350,7 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
     return G_status[G_lvl].key;
 }
 
-static int streamXML(xmlTextReaderPtr reader) {
+static int streamXML(xmlTextReaderPtr reader, short variant) {
            int              ret;
            int              type;
            char            *name;
@@ -443,6 +448,7 @@ static int streamXML(xmlTextReaderPtr reader) {
                               }
                               (void)insert_column(&G_col);
                               memset(&G_col, 0, sizeof(TABCOLUMN_T));
+                              G_col.varid = variant;
                               break;
                          case STATUS_FK:
                               if (G_debug) {
@@ -457,6 +463,7 @@ static int streamXML(xmlTextReaderPtr reader) {
                               }
                               (void)insert_foreignkey(&G_fk, fkcol_list);
                               memset(&G_fk, 0, sizeof(TABFOREIGNKEY_T));
+                              G_fk.varid = variant;
                               free_colfk(&fkcol_list);
                               break;
                          case STATUS_IDX:
@@ -468,6 +475,7 @@ static int streamXML(xmlTextReaderPtr reader) {
                               }
                               (void)insert_index(&G_idx);
                               memset(&G_idx, 0, sizeof(TABINDEX_T));
+                              G_idx.varid = variant;
                               break;
                          case STATUS_ICO:
                               if (G_debug) {
@@ -487,6 +495,7 @@ static int streamXML(xmlTextReaderPtr reader) {
                               }
                               (void)insert_indexcol(&G_idxcol);
                               memset(&G_idxcol, 0, sizeof(TABINDEXCOL_T));
+                              G_idxcol.varid = variant;
                               break;
                          case STATUS_TAB:
                               if (G_debug) {
@@ -497,6 +506,7 @@ static int streamXML(xmlTextReaderPtr reader) {
                               }
                               (void)insert_table(&G_tab);
                               memset(&G_tab, 0, sizeof(TABTABLE_T));
+                              G_tab.varid = variant;
                               break;
                          default:
                               break;
@@ -657,7 +667,7 @@ static int streamFile(const char *filename) {
      if (filename) {
         reader = xmlReaderForFile(filename, NULL, 0);
         if (reader != NULL) {
-           ret = streamXML(reader);
+           ret = streamXML(reader, 0);
         } else {
           fprintf(stderr, "Unable to open %s\n", filename);
         }
@@ -672,7 +682,7 @@ static int streamFileDescriptor(const int fd) {
      if (fd >= 0) {
         reader =  xmlReaderForFd(fd, NULL, NULL, 0);
         if (reader != NULL) {
-           ret = streamXML(reader);
+           ret = streamXML(reader, 0);
         } else {
           fprintf(stderr, "Unable to open file descriptor %d\n", fd);
         }
@@ -680,20 +690,22 @@ static int streamFileDescriptor(const int fd) {
      return ret;
 }
 
-static int streamMemory(const char *p) {
+#ifndef STANDALONE
+static int streamMemory(short variant, const char *p) {
      xmlTextReaderPtr reader;
      int              ret = -1;
 
      if (p) {
         reader = xmlReaderForMemory(p, strlen(p), NULL, NULL, 0);  
         if (reader != NULL) {
-           ret = streamXML(reader);
+           ret = streamXML(reader, variant);
         } else {
           fprintf(stderr, "Unable to create XML reader for memory\n");
         }
      }
      return ret;
 }
+#endif
 
 static void XMLstart(void) {
   /*
@@ -736,7 +748,7 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Expected XML file name\n");
       exit(EXIT_FAILURE);
     }
-    init_struct();
+    init_struct(0);
     (void)db_connect();
     XMLstart();
     (void)db_begin_tx();
@@ -747,16 +759,16 @@ int main(int argc, char **argv) {
     return(0);
 }
 #else
-extern int parseXML(char *xml, char show_tags, char debug) {
+extern int parseXML(short variant, char *xml, char show_tags, char debug) {
     int ret = -1;
 
     if (debug) {
       G_debug = 1;
     }
-    init_struct();
+    init_struct(variant);
     XMLstart();
     (void)db_begin_tx();
-    ret = streamMemory((const char *)xml);
+    ret = streamMemory(variant, (const char *)xml);
     (void)db_commit();
     XMLend();
     return ret;
@@ -767,7 +779,7 @@ extern int parsePipedXML(int fd, char show_tags, char debug) {
     if (debug) {
       G_debug = 1;
     }
-    init_struct();
+    init_struct(0);
     XMLstart();
     (void)db_begin_tx();
     ret = streamFileDescriptor((const int)fd);
@@ -784,7 +796,7 @@ extern int parsePipedXML(int fd, char show_tags, char debug) {
         exit(1);
      }
 #else
-extern void parseXML(char *xml, char show_tags, char debug) {
+extern void parseXML(short variant, char *xml, char show_tags, char debug) {
         fprintf(stderr, "XInclude support not compiled in\n");
         exit(1);
     }

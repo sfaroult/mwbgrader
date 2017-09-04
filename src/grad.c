@@ -12,6 +12,8 @@ static char *G_grad_words[] = {
     "multiple_legs",
     "no_pk",
     "no_uniqueness",
+    "number_of_info_pieces",
+    "number_of_tables",
     "one_one_relationship",
     "percent_commented_columns",
     "percent_commented_tables",
