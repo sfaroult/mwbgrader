@@ -1,3 +1,11 @@
+/* =================================================================== *
+ *
+ *         mwbgrader.c
+ *
+ *        Written by Stéphane Faroult
+ *
+ * =================================================================== */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -191,6 +199,10 @@ int main(int argc, char **argv) {
       for (i = 0; i < variant_cnt; i++) {
         graderef(variant_arr[i]);
       }
+      // We disconnect from the reference database.
+      // It will be later attached to the in-memory
+      // database where the submitted model will
+      // be uploaded.
       db_disconnect();
     }
     for (i = 0; i < argc; i++) {
@@ -214,7 +226,8 @@ int main(int argc, char **argv) {
           int   dpct = 0; // Percentage of data pieces respective to the model
           int   tpct = 0; // Percentages of tables respective to the model
 
-          // Connect to the memory database
+          // Connect to the memory database (it also attaches
+          // to the reference database if there is one)
           ret |= db_connect();
           ret |= parseXML(0, p, debugging(), debugging());
           if (reference) {

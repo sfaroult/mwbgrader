@@ -1,3 +1,11 @@
+/* ============================================================== *
+ *
+ *    grading.c
+ *
+ *  All the grading intelligence is here.
+ *
+ * ============================================================== */
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -38,8 +46,8 @@ typedef struct overview {
 typedef struct {
           short check_code;
           char *description;
-          char *sql;
-          char *sql2; // When there is a reference model
+          char *sql;  // Query applied to the submission
+          char *sql2; // Query applied to the reference model (always a count)
           short rule;
           float threshold;
           float val;
@@ -950,23 +958,23 @@ extern void show_grading(void) {
                        "" : " if it happens");
                break;
           case SUB_EACH:
-               printf("# subtract %d from grade for each occurrence\n",
-                      (int)G_grading[i].val);
+               printf("# subtract %.1f from grade for each occurrence\n",
+                      G_grading[i].val);
                break;
           case SUB_ONCE:
-               printf("# subtract %d from grade%s\n",
-                      (int)G_grading[i].val,
+               printf("# subtract %.1f from grade%s\n",
+                      G_grading[i].val,
                        ((G_grading[i].rule & AT_LEAST)
                         || (G_grading[i].rule & AT_LEAST)) ? 
                        "" : " if it happens");
                break;
           case ADD_EACH:
-               printf("# add %d to grade for each occurrence\n",
-                      (int)G_grading[i].val);
+               printf("# add %.1f to grade for each occurrence\n",
+                      G_grading[i].val);
                break;
           case ADD_ONCE:
-               printf("# add %d to grade%s\n",
-                       (int)G_grading[i].val,
+               printf("# add %.1f to grade%s\n",
+                       G_grading[i].val,
                        ((G_grading[i].rule & AT_LEAST)
                         || (G_grading[i].rule & AT_LEAST)) ? 
                        "" : " if it happens");

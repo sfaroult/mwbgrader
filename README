@@ -1,0 +1,26 @@
+ABOUT MWBGRADER
+===============
+mwbgrader is a program to assign a grade to a submitted .mwb
+MySQL Workbench file. There are two main operating modes:
+* Grading a .mwb on its own.
+  The program looks for common mistakes and takes points off
+  when something that has strong odds of being a design mistake is
+  encountered.
+* Comparing a .mwb to a "correct design"
+  In that case, a "distance" is measured between the submission and
+  the "correct design" (note that several acceptable designs can 
+  be provided by the instructor; the submission is compared to the 
+  closest). This "distance" is used to compute a part of the grade.
+  The other part of the grade is computed as when the .mwb file is
+  graded on its own, with the difference that if the "correct design"
+  doesn't pass a test, the test isn't applied to the submission.
+
+Note that grading is optional, and the tool (which can provide with the
+-r flag a report on the checks if performs) can also be used to provide
+feedback about possible weaknesses in the database model at the start
+of a project.
+A default, and reasonable for the author, grading scheme is coded in the tool
+but can be completely overridden, which can be useful for adjusting to
+the level of the authors of the design being appraised.
+
+
