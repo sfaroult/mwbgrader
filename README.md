@@ -7,8 +7,10 @@ The -g option documents all the points that are checked as well as the rules use
 There are two basic ways of using the program:
  - Assessing that a model respects a number of rules. It says of course nothing about the suitability of the model for any purpose, but ensures that the foundations are sound. This can be used for assessing the design before coding starts on a project.
  - Comparing the model to one or several models acknowledged to be correct. In that case, the -m flag can be followed by the name of a .mwb file provided by the instructor. It's possible to provide several variants, and to assign a maximum grade to each variant, eg
+ ```
     mwbgrader -m best_model.mwb -m acceptable_model.mwb:90 submission.mwb
-In that case, the "submission.mwb" model will be compared to the two submitted instructor models, and matched to the closest one. If the closest one happens to be acceptable_model.mwb, the starting grade will be 90 instead of 100 (the default). 
+ ```
+In the latter case, the "submission.mwb" model will be compared to the two submitted instructor models, and matched to the closest one. If the closest one happens to be acceptable_model.mwb, the starting grade will be 90 instead of 100 (the default). 
   When one or several models are provided, the final grade is made of two components:
    - a grade that measures the closeness to the matching model (70% of the final grade by default)
    - a grade that measures the respect of rules (30% of the final grade by default), which can be at most the grade associated with the matching model. Note that if the model doesn't respect a rule, the check isn't performed for the submission.
