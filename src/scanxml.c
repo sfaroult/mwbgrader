@@ -318,22 +318,28 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
           }
           fputc('\n', fpcatpath);
 #else
+          if (G_debug) {
+            fprintf(stderr, "looking for %s ", (char *)v);
+          }
           keyid = mwbkey_search((char *)v);
           switch(keyid) {
             case MWBKEY_NOT_FOUND:
+                 if (G_debug) {
+                   fprintf(stderr, "NOT FOUND\n");
+                 }
                  break;
             default:
                  snprintf(synth_id, SYNTH_ID_LEN,
                           "%s_%s",
                           catpath_keyword(G_status[G_lvl].catpath),
                           (char *)v);
-                 //if (G_debug) {
-                 //  printf("\n%s (", synth_id);
-                 //}
+                 if (G_debug) {
+                   fprintf(stderr, " - %s (", synth_id);
+                 }
                  G_status[G_lvl].key = synth_search(synth_id);
-                 //if (G_debug) {
-                 //  printf("%d)\n", G_status[G_lvl].key);
-                 //}
+                 if (G_debug) {
+                   fprintf(stderr, "%d)\n", G_status[G_lvl].key);
+                 }
                  break;
           }
 #endif

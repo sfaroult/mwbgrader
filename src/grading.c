@@ -35,6 +35,8 @@
                       while (__len && isspace(s[__len-1])){__len--;}\
                       s[__len] = '\0';}}
 #define _skip_spaces(s) {if (s) {while (isspace(*s)) {s++;}}}
+#define _max(a, b)      ((a > b) ? a : b)
+#define _min(a, b)      ((a > b) ? b : a)
 
 typedef struct overview {
                int             tabcnt;
@@ -51,6 +53,8 @@ typedef struct {
           short rule;
           float threshold;
           float val;
+          short cap;  // Maximum number of times points are taken off
+                      // or added, for rules that apply to each occurrence
           short next; // "Pointer" - index of the next control to run
          } GRADING_T;
 
@@ -107,6 +111,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               5.0,
+              999,
               -1},
              {GRAD_NUMBER_OF_TABLES,
               "Required number of tables in the schema",
@@ -115,6 +120,7 @@ static GRADING_T G_grading[] =
               SUB_ONCE | AT_LEAST,
               4,
               15.0,
+              999,
               -1},
              {GRAD_NUMBER_OF_INFO_PIECES,
               "Required number of information pieces in the schema",
@@ -142,6 +148,7 @@ static GRADING_T G_grading[] =
               SUB_ONCE | AT_LEAST,
               10,
               5.0,
+              999,
               -1},
              {GRAD_ISOLATED_TABLES,
               "Tables not involved into any FK relationship",
@@ -176,6 +183,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               3.0,
+              999,
               -1},
              {GRAD_TOO_MANY_FK_TO_SAME,
               "Tables with more than two FKs to the same table",
@@ -205,6 +213,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               1.5,
+              999,
               -1},
              {GRAD_SINGLE_COL_TABLE,
               "Tables with a single column",
@@ -226,6 +235,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               3.5,
+              999,
               -1},
              {GRAD_PERCENT_SINGLE_COL_IDX,
               "Single column indexes as a percentage",
@@ -256,6 +266,7 @@ static GRADING_T G_grading[] =
               SUB_ONCE | AT_MOST,
               99,
               5.0,
+              999,
               -1},
              {GRAD_SAME_VARCHAR_LENGTH,
               "All varchars have a default 'just in case' value",
@@ -276,6 +287,7 @@ static GRADING_T G_grading[] =
               SUB_ONCE,
               0,
               5.0,
+              999,
               -1},
              {GRAD_SAME_DATATYPE_FOR_ALL_COLS,
               "Tables where all columns look like default varchar columns",
@@ -308,6 +320,7 @@ static GRADING_T G_grading[] =
               SUB_ONCE,
               0,
               3.5,
+              999,
               -1},
              {GRAD_REDUNDANT_INDEXES,
               "Single-column indexes made useless by a multiple column index",
@@ -351,6 +364,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               2.0,
+              999,
               -1},
              {GRAD_NO_PK,
               "Tables without a primary (or unique) key",
@@ -367,6 +381,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               10.0,
+              999,
               -1},
              {GRAD_ONE_ONE_RELATIONSHIP,
               "Tables in a one-to-one relationship that"
@@ -475,6 +490,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               3.0,
+              999,
               -1},
              {GRAD_NO_UNIQUENESS,
               "Tables with no other unique columns"
@@ -504,6 +520,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               4.0,
+              999,
               -1},
              {GRAD_PERCENT_COMMENTED_TABLES,
               "Percentage of tables with comments",
@@ -517,6 +534,7 @@ static GRADING_T G_grading[] =
               SUB_ONCE | AT_LEAST,
               50,
               5.0,
+              999,
               -1},
              {GRAD_MULTIPLE_LEGS,
               "Three-legged (or more) many-to-many relationships",
@@ -552,6 +570,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               2.5,
+              999,
               -1},
              {GRAD_PERCENT_COMMENTED_COLUMNS,
               "Percentage of columns with comments",
@@ -567,6 +586,7 @@ static GRADING_T G_grading[] =
               SUB_ONCE | AT_LEAST,
               10,
               5.0,
+              999,
               -1},
              {GRAD_CIRCULAR_FK,
               "Presence of circular foreign keys",
@@ -590,6 +610,7 @@ static GRADING_T G_grading[] =
               SUB_ONCE,
               0,
               10.0,
+              999,
               -1},
              {GRAD_START_GRADE,
               "Initial grade from which the final grade is computed",
@@ -598,6 +619,7 @@ static GRADING_T G_grading[] =
               ASSIGN,
               0,
               100.0,
+              999,
               -1},
              {GRAD_ULTRA_WIDE,
               "Tables with a number of columns far above other tables",
@@ -630,6 +652,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               1.0,
+              999,
               -1},
              {GRAD_USELESS_AUTOINC,
               "Unreferenced tables with a system-generated row identifier",
@@ -658,6 +681,7 @@ static GRADING_T G_grading[] =
               SUB_EACH,
               0,
               0.5,
+              999,
               -1}
              };
 
@@ -676,15 +700,18 @@ static void grading_info(GRADING_T *g) {
        printf(" rule      = %hd\n", g->rule);
        printf(" threshold = %f\n", g->threshold);
        printf(" val       = %f\n", g->val);
+       printf(" cap       = %hd\n", g->cap);
        printf(" next      = %hd\n", g->next);
        printf("--------------\n");
        fflush(stdout);
     }
 }
 
-static short read_rules(char *str, short *prule, float *pval, int linenum) {
+static short read_rules(int gcode, char *str, short *prule,
+                        float *pval, short *pcap, int linenum) {
     short  ret = -1;
     char  *p = str;
+    char  *q;
 
     if (str && prule && pval) {
       switch(*p) {
@@ -697,7 +724,7 @@ static short read_rules(char *str, short *prule, float *pval, int linenum) {
         case '-':
         case '*':
              *prule = (*p == '+' ? ADD_ONCE :
-                                   (*p == '-' ? SUB_ONCE : MULT_ONCE));
+                            (*p == '-' ? SUB_ONCE : MULT_ONCE));
              if (*(p+1) == *p) {
                *prule = (2 * (*prule));
                p++;
@@ -708,25 +735,51 @@ static short read_rules(char *str, short *prule, float *pval, int linenum) {
                        "Missing value in configuration file line %d\n",
                        linenum);
              } else {
-               // There should be nothing else on the line
                ret = 0;
-               while (*p) {
-                 if (!isspace(*p)) {
-                   fprintf(stderr,
-                       "\"%s\" unexpected in configuration file line %d\n",
-                       p,
-                       linenum);
-                   ret = -1;
-                   break;
+               // Check if there is a limit
+               if ((*prule == ADD_EACH)
+                   || (*prule == SUB_EACH)
+                   || (*prule == MULT_EACH)) {
+                 if ((q = strchr(p, '|')) != NULL) {
+                   q++;
+                   if (sscanf(q, "%hd", pcap) != 1) {
+                     fprintf(stderr,
+                         "Invalid limit \"%s\" in configuration file line %d\n",
+                         q,
+                         linenum);
+                     ret = -1;
+                   } else {
+                     *pcap = (short)999;
+                   }
                  }
                }
              }
              break;
        default:
-             fprintf(stderr,
-                     "Invalid rule \"%s\" in configuration file line %d\n",
-                     p,
-                     linenum);
+             while (isspace(*p)) {
+               p++;
+             }
+             if (*p == '\0') {
+               *prule = NO_RULE;
+               *pval = 0;
+               ret = 0;
+             } else {
+               if (gcode == GRAD_START_GRADE) {
+                 *prule = NO_RULE;
+                 if (sscanf(p, "%f", pval) != 1) {
+                   fprintf(stderr,
+                           "Missing value in configuration file line %d\n",
+                           linenum);
+                 } else {
+                   ret = 0;
+                 }
+               } else {
+                 fprintf(stderr,
+                         "Invalid rule \"%s\" in configuration file line %d\n",
+                         p,
+                         linenum);
+               }
+             }
              break;
      }
    }
@@ -778,6 +831,9 @@ extern void read_grading(char *grading_file) {
         G_chain_start = i;
       }
     }
+    if (debugging()) {
+      fprintf(stderr, "Chain start: %d\n", G_chain_start);
+    }
     // Set the default sequence for check operations
     current = G_chain_start;
     for (i = 1; i < GRAD_COUNT; i++) {
@@ -803,6 +859,11 @@ extern void read_grading(char *grading_file) {
       fp = fopen("grading.conf", "r");
     }
     if (fp) {
+      previous_check = -1;
+      if (debugging()) {
+        fprintf(stderr, "Reading configuration file\n");
+        fprintf(stderr, "previous_check: %d\n", previous_check);
+      }
       while (ok && fgets(line, LINE_LEN, fp)) {
         linenum++;
         if ((p = strchr(line, '#')) != NULL) {
@@ -819,7 +880,7 @@ extern void read_grading(char *grading_file) {
           _trim(p);
           gcode = grad_search(p);
           if (gcode == GRAD_NOT_FOUND) {
-            fprintf(stderr, "Invalid grading control %s\n", p);
+            fprintf(stderr, "Invalid grading control \"%s\"\n", p);
             // Try to find the closest one
             smallest_lev = strlen(p) + 1;
             for (i = 0; i < GRAD_COUNT; i++) {
@@ -835,29 +896,49 @@ extern void read_grading(char *grading_file) {
             }
             ok = 0;
           } else {
+            if (debugging()) {
+              fprintf(stderr, "%s (follows %s",
+                      p,
+                      (previous_check == -1) ?
+                      "nothing)\n" :
+                      grad_keyword(G_grading[previous_check].check_code));
+            }
             if ((previous_check == -1) 
                && (gcode != GRAD_START_GRADE)) {
               // Invalid - Start grade MUST come first
               fprintf(stderr, "start_grade must be specified first"
                               " even when no grading is applied.\n");
               ok = 0;
-            } 
-            i = 0;
-            while ((i < grading_options)
-                   && ((int)G_grading[i].check_code != gcode)) {
-              i++;
+            } else {
+              if (previous_check == -1) {
+                previous_check = G_chain_start;
+              }
             }
-            if (i < grading_options) {
-              if (gcode != GRAD_START_GRADE) {
-                if (previous_check == -1) {
-                  G_grading[G_chain_start].next = i;
-                } else {
-                  G_grading[previous_check].next = i;
+            if (ok && (gcode != GRAD_START_GRADE)) {
+              if (debugging()) {
+                fprintf(stderr, "[%hd])\n", previous_check);
+              }
+              i = 0;
+              while ((i < grading_options)
+                     && ((int)G_grading[i].check_code != gcode)) {
+                i++;
+              }
+              if (i < grading_options) {
+                if (debugging()) {
+                  fprintf(stderr, "\t%s found at %d\n",
+                                  grad_keyword(gcode), i);
+                }
+                G_grading[previous_check].next = (short)i;
+                G_grading[i].next = -1;
+                previous_check = (short)i;
+              } else {
+                if (debugging()) {
+                  fprintf(stderr, "\tCouldn't find %s\n", grad_keyword(gcode));
                 }
               }
-              G_grading[i].next = -1;
-              previous_check = i;
-              // Now check what we have on the line
+            }
+            // Now check what we have on the line
+            if (q) {
               switch (*q) {
                 case '<':
                 case '>':
@@ -882,10 +963,15 @@ extern void read_grading(char *grading_file) {
                                  linenum);
                          ok = 0; 
                        }
+                       if ((q = strchr(q, ']')) != NULL) {
+                         q++;
+                       }
                      }
                      if (ok) {
-                       ok = (0 ==  read_rules(q, &(G_grading[i].rule),
-                                              &(G_grading[i].val), linenum));
+                       ok = (0 ==  read_rules(gcode, q, &(G_grading[i].rule),
+                                              &(G_grading[i].val),
+                                              &(G_grading[i].cap),
+                                              linenum));
                      }
                      if (ok) {
                        G_grading[i].rule |= rule;
@@ -900,17 +986,23 @@ extern void read_grading(char *grading_file) {
                                  grad_keyword(gcode), linenum);
                        ok = 0;
                      } else {
-                       ok = (0 ==  read_rules(q, &(G_grading[i].rule),
-                                              &(G_grading[i].val), linenum));
+                       ok = (0 ==  read_rules(gcode, q,
+                                              &(G_grading[i].rule),
+                                              &(G_grading[i].val),
+                                              &(G_grading[i].cap),
+                                              linenum));
                      }
                      break;
               }
-            }  // else missing option - ignore
-               // Valid option not implemented yet
+            }
           }
         }
       }
       fclose(fp);
+      if (debugging()) {
+        fprintf(stderr, "From configuration file:\n");
+        show_grading();
+      }
     } else {
       fprintf(stderr, "Warning: applying the default grading scheme\n");
     }
@@ -919,6 +1011,10 @@ extern void read_grading(char *grading_file) {
 extern void show_grading(void) {
     short i = G_chain_start;
     short rule;
+    char  cap[30];
+    if (debugging()) {
+      fprintf(stderr, "--- G_chain_start: %hd\n", G_chain_start);
+    }
     printf("#\n");
     printf("# Rules are expressed as :\n");
     printf("#   rule_name [ = formula]\n");
@@ -927,98 +1023,123 @@ extern void show_grading(void) {
     printf("# the computation of a grade.\n");
     printf("# For the start grade (must come first if you grade) the\n");
     printf("# formula is a simple assignment. Otherwise, the formula is\n");
-    printf("# an operator (+,-,*,/) followed by the value applied to\n");
-    printf("# the grade. If the operator is repeated, the operation\n");
-    printf("# is applied for every occurrence.\n");
+    printf("# an operator (+,-,*) followed by the value applied to\n");
+    printf("# the grade (no division but the value isn't necessarily\n");
+    printf("# an integer value). If the operator is repeated, the\n");
+    printf("# operation is applied for every occurrence. In that case\n");
+    printf("# a limit can be set to the maximum number of times the\n");
+    printf("# operation is applied with a vertical bar followed by the\n");
+    printf("# limit. For instance:\n");
+    printf("#     <rule_name> = --5|3\n");
+    printf("# will remove 5 points for each violation of the rule, up\n");
+    printf("# to 15 points (3 times).\n");
     printf("# Rules the name of which starts with \"percent\" or \"number\"\n");
     printf("# take a comparator (< or >) followed by a threshold value\n");
     printf("# between square brackets before the formula proper.\n");
     printf("# \n");
 
     while (i != -1) {
-        rule = G_grading[i].rule & ~AT_MOST & ~AT_LEAST;
-        if (G_grading[i].description) {
-          printf("# %s\n", G_grading[i].description);
-        }
-        if (G_grading[i].rule & AT_LEAST) {
-          printf("# when value is smaller than threshold\n");
-        } else if (G_grading[i].rule & AT_MOST) {
-          printf("# when value is greater than threshold\n");
-        }
+      rule = G_grading[i].rule & ~AT_MOST & ~AT_LEAST;
+      if (G_grading[i].description) {
+        printf("# %s\n", G_grading[i].description);
+      }
+      if (G_grading[i].rule & AT_LEAST) {
+        printf("# when value is smaller than threshold\n");
+      } else if (G_grading[i].rule & AT_MOST) {
+        printf("# when value is greater than threshold\n");
+      }
+      sprintf(cap, " up to %hd times", G_grading[i].cap);
+      switch(rule) {
+        case MULT_EACH:
+             printf("# multiply grade by %.1f for each occurrence%s\n",
+                     G_grading[i].val,
+                     (G_grading[i].cap == 999 ? "": cap));
+             break;
+        case MULT_ONCE:
+             printf("# multiply grade by %.1f%s\n",
+                     G_grading[i].val,
+                     ((G_grading[i].rule & AT_LEAST)
+                      || (G_grading[i].rule & AT_LEAST)) ? 
+                     "" : " if it happens");
+             break;
+        case SUB_EACH:
+             printf("# subtract %.1f from grade for each occurrence%s\n",
+                    G_grading[i].val,
+                    (G_grading[i].cap == 999 ? "": cap));
+             break;
+        case SUB_ONCE:
+             printf("# subtract %.1f from grade%s\n",
+                    G_grading[i].val,
+                     ((G_grading[i].rule & AT_LEAST)
+                      || (G_grading[i].rule & AT_LEAST)) ? 
+                     "" : " if it happens");
+             break;
+        case ADD_EACH:
+             printf("# add %.1f to grade for each occurrence%s\n",
+                    G_grading[i].val,
+                    (G_grading[i].cap == 999 ? "": cap));
+             break;
+        case ADD_ONCE:
+             printf("# add %.1f to grade%s\n",
+                     G_grading[i].val,
+                     ((G_grading[i].rule & AT_LEAST)
+                      || (G_grading[i].rule & AT_LEAST)) ? 
+                     "" : " if it happens");
+             break;
+        default:
+             break;
+      } 
+      printf("%s%s",
+             grad_keyword(G_grading[i].check_code),
+             (rule == NO_RULE ? "" : " = "));
+
+      if (G_grading[i].rule & AT_MOST) {
+        printf(">[%.1f]", G_grading[i].threshold);
+      } else if (G_grading[i].rule & AT_LEAST) {
+        printf("<[%.1f]", G_grading[i].threshold);
+      }
+      if (G_grading[i].val && (rule != NO_RULE)) {
+        switch(rule) {
+            case ASSIGN:
+                 break;
+            case MULT_EACH:
+                 putchar('*');
+            case MULT_ONCE:
+                 putchar('*');
+                 break;
+            case SUB_EACH:
+                 putchar('-');
+            case SUB_ONCE:
+                 putchar('-');
+                 break;
+            case ADD_EACH:
+                 putchar('+');
+            case ADD_ONCE:
+                 putchar('+');
+                 break;
+            default:
+                 break;
+        } 
+        printf("%.1f", G_grading[i].val);
         switch(rule) {
           case MULT_EACH:
-               printf("# multiply grade by %.1f for each occurrence\n",
-                       G_grading[i].val);
-               break;
-          case MULT_ONCE:
-               printf("# multiply grade by %.1f%s\n",
-                       G_grading[i].val,
-                       ((G_grading[i].rule & AT_LEAST)
-                        || (G_grading[i].rule & AT_LEAST)) ? 
-                       "" : " if it happens");
-               break;
           case SUB_EACH:
-               printf("# subtract %.1f from grade for each occurrence\n",
-                      G_grading[i].val);
-               break;
-          case SUB_ONCE:
-               printf("# subtract %.1f from grade%s\n",
-                      G_grading[i].val,
-                       ((G_grading[i].rule & AT_LEAST)
-                        || (G_grading[i].rule & AT_LEAST)) ? 
-                       "" : " if it happens");
-               break;
           case ADD_EACH:
-               printf("# add %.1f to grade for each occurrence\n",
-                      G_grading[i].val);
-               break;
-          case ADD_ONCE:
-               printf("# add %.1f to grade%s\n",
-                       G_grading[i].val,
-                       ((G_grading[i].rule & AT_LEAST)
-                        || (G_grading[i].rule & AT_LEAST)) ? 
-                       "" : " if it happens");
+               if (G_grading[i].cap != 999) {
+                 printf("|%hd", G_grading[i].cap);
+               }
                break;
           default:
                break;
-        } 
-        printf("%s%s",
-               grad_keyword(G_grading[i].check_code),
-               (rule == NO_RULE ? "" : " = "));
-
-        if (G_grading[i].rule & AT_MOST) {
-          printf(">[%.1f]", G_grading[i].threshold);
-        } else if (G_grading[i].rule & AT_LEAST) {
-          printf("<[%.1f]", G_grading[i].threshold);
         }
-        if (G_grading[i].val && (rule != NO_RULE)) {
-          switch(rule) {
-              case ASSIGN:
-                   break;
-              case MULT_EACH:
-                   putchar('*');
-              case MULT_ONCE:
-                   putchar('*');
-                   break;
-              case SUB_EACH:
-                   putchar('-');
-              case SUB_ONCE:
-                   putchar('-');
-                   break;
-              case ADD_EACH:
-                   putchar('+');
-              case ADD_ONCE:
-                   putchar('+');
-                   break;
-              default:
-                   break;
-          } 
-          printf("%.1f\n", G_grading[i].val);
-        } else {
-          putchar('\n');
-        }
-        i = G_grading[i].next;
+      }
+      putchar('\n');
+      i = G_grading[i].next;
+      if (debugging()) {
+        fprintf(stderr, "--- i: %hd\n", i);
+      }
     }
+    fflush(stdout);
 }
 
 extern void set_model_weight(short val) {
@@ -1115,6 +1236,7 @@ extern int grade(char report, short refvar, float max_grade) {
       if (debugging()) { 
         printf("i = %hd\n", i);
         grading_info(&(G_grading[i]));
+        fflush(stdout);
       }
       rule = G_grading[i].rule & ~AT_MOST & ~AT_LEAST;
       if (!no_grading && (rule != NO_RULE)) {
@@ -1153,7 +1275,9 @@ extern int grade(char report, short refvar, float max_grade) {
           switch(rule) {
             case MULT_EACH:
                  for (k = 0; k < query_result; k++) {
-                   work_grade *= G_grading[i].val;
+                   if (k < G_grading[i].cap) {
+                     work_grade *= G_grading[i].val;
+                   }
                  }
                  if (report && !no_grading && (prev_grade != work_grade)) {
                    printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
@@ -1170,7 +1294,8 @@ extern int grade(char report, short refvar, float max_grade) {
                  }
                  break;
             case SUB_EACH:
-                 work_grade -= (query_result * G_grading[i].val);
+                 work_grade -= (_min(query_result, G_grading[i].cap)
+                                * G_grading[i].val);
                  if (report && !no_grading && (prev_grade != work_grade)) {
                    printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
                                                  (int)(work_grade+0.5));
@@ -1186,7 +1311,8 @@ extern int grade(char report, short refvar, float max_grade) {
                  }
                  break;
             case ADD_EACH:
-                 work_grade += (query_result * G_grading[i].val);
+                 work_grade += (_min(query_result, G_grading[i].cap)
+                                * G_grading[i].val);
                  if (report && !no_grading && (prev_grade != work_grade)) {
                    printf("\tgrade: %d -> %d\n", (int)(prev_grade+0.5),
                                                  (int)(work_grade+0.5));
@@ -1205,6 +1331,7 @@ extern int grade(char report, short refvar, float max_grade) {
                  break;
           } 
         } 
+        fflush(stdout);
       } else {
         if (debugging()) {
           if (G_grading[i].sql) {

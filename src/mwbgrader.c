@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
     char            display_grading = 0;
     char            refmodel[FILENAME_MAX];
     short           variant;
-    short           model_weight = 0;
+    short           model_weight = MODEL_WEIGHT;
     char            reference = 0;
     short           variant_arr[MAX_VARIANTS];
     short           variant_cnt = 0;

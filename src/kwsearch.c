@@ -15,42 +15,35 @@ extern int kw_search(int kwc, char *kwv[], char *w) {
   int   mid;
   int   pos = -1;
   int   comp;
-  char *wup;
-  char *p;
 
   if (kwv && kwc && w) {
-    // strcasecmp() seems to have problems with _.
-    // Converting the word to uppercase and performing
-    // a plain case sensitive comparison
-    wup = strdup(w);
-    assert(wup);
-    p = wup;
-    while (*p) {
-      *p = toupper(*p);
-      p++;
-    }
+    fprintf(stderr, "Looking for %s\n", w);
     while (start <= end){
       mid = (start + end) / 2;
       /*
-      printf("Comparing %s@%d [%s@%d to %s@%d] to %s\n",
+      fprintf(stderr, "Comparing %s@%d [%s@%d to %s@%d] to %s\n",
               kwv[mid], mid,
               kwv[start], start,
               kwv[end], end,
               w);
-      */
-      if ((comp = strcmp(kwv[mid], wup)) == 0) {
+     */
+      //                      s1      s2
+      if ((comp = strcasecmp(kwv[mid], w)) == 0) {
          pos = mid;
          start = end + 1; // Found
       } else {
+        fprintf(stderr, "comp = %d start = %d, end = %d\n", comp, start, end);
         if (comp < 0) {  // Searched word comes after word @mid
+           // s1 < s2
            start = mid + 1;
         } else {
+           // s1 > s2
            end = mid - 1;
         }
+        fprintf(stderr, "comp = %d start = %d (%s), end = %d (%s)\n",
+                comp, start, kwv[start], end, kwv[end]);
       }
-      // printf("comp = %d start = %d, end = %d\n", comp, start, end);
     }
-    free(wup);
   }
   return pos;
 }
