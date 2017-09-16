@@ -9,7 +9,7 @@ Here is the default grading scheme (output when using the -g option without any 
 ```
 #
 # Rules are expressed as :
-#   rule_name \[ = formula\]
+#   rule_name [ = formula]
 # If the formula is absent, the rule will be checked and
 # problems reported, but the rule will not intervene in
 # the computation of a grade.
@@ -88,7 +88,7 @@ redundant_indexes = --2.0
 # Percentage of tables with comments
 # when value is smaller than threshold
 # subtract 5.0 from grade
-percent_commented_tables = <\50.0]-5.0
+percent_commented_tables = <[50.0]-5.0
 # Percentage of columns with comments
 # when value is smaller than threshold
 # subtract 5.0 from grade
