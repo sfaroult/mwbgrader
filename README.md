@@ -5,6 +5,7 @@ There is a default grading scheme that can be overriden.
 The -g option documents all the points that are checked as well as the rules used for computing the grade. Its output can be used to generate a customized grading scheme (the program tries to read "grading.conf" by default); some of the points checked may also be skipped.
 
 Here is the default grading scheme (output when using the -g option without any customized grading file):
+
 \#
 \# Rules are expressed as :
 \#   rule_name \[ = formula\]
@@ -91,7 +92,7 @@ percent_commented_tables = <\[50.0\]-5.0
 \# when value is smaller than threshold
 \# subtract 5.0 from grade
 percent_commented_columns = <\[10.0\]-5.0
-
+```
 
 There are two basic ways of using the program:
  - Assessing that a model respects the rules above. It says of course nothing about the suitability of the model for any purpose, but ensures that the foundations are sound. This can be used for assessing the design before coding starts on a project.
