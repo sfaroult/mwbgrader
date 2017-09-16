@@ -6,6 +6,7 @@ The -g option documents all the points that are checked as well as the rules use
 
 Here is the default grading scheme (output when using the -g option without any customized grading file):
 
+```
 \#
 \# Rules are expressed as :
 \#   rule_name \[ = formula\]
