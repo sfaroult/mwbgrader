@@ -393,7 +393,8 @@ extern int insert_table(TABTABLE_T *t) {
       sqlite3_finalize(stmt);
     }
     if (debugging()) {
-      fprintf(stderr, "<< insert_table - %s\n", (ret == 0 ? "SUCCESS":"FAILURE"));
+      fprintf(stderr, "<< insert_table - %s\n",
+                      (ret == 0 ? "SUCCESS":"FAILURE"));
     }
     return ret;
 }
@@ -592,14 +593,14 @@ extern int insert_index(TABINDEX_T *i) {
       }
       _must_succeed("insert index",
                     sqlite3_prepare_v2(G_db,
-                                "insert into tabIndex(mwb_id,tabid,"
-                                "name,isPrimary,isUnique)"
-                                " select ltrim(rtrim(?1,'}'),'{'),id,lower(?3),?4,?5"
-                                " from tabTable where mwb_id=ltrim(rtrim(?2,'}'),'{')"
-                                " and varid=?6",
-                                -1, 
-                                &stmt,
-                                (const char **)&ztail));
+                       "insert into tabIndex(mwb_id,tabid,"
+                       "name,isPrimary,isUnique)"
+                       " select ltrim(rtrim(?1,'}'),'{'),id,lower(?3),?4,?5"
+                       " from tabTable where mwb_id=ltrim(rtrim(?2,'}'),'{')"
+                       " and varid=?6",
+                       -1, 
+                       &stmt,
+                       (const char **)&ztail));
       if ((sqlite3_bind_text(stmt, 1,
                             (const char*)i->id, -1,
                             SQLITE_STATIC) != SQLITE_OK)
@@ -667,7 +668,8 @@ extern int insert_index(TABINDEX_T *i) {
       sqlite3_finalize(stmt);
     }
     if (debugging()) {
-      fprintf(stderr, "<< insert_index - %s\n", (ret == 0 ? "SUCCESS":"FAILURE"));
+      fprintf(stderr, "<< insert_index - %s\n",
+                      (ret == 0 ? "SUCCESS":"FAILURE"));
     }
     return ret;
 }
@@ -739,7 +741,8 @@ extern int insert_indexcol(TABINDEXCOL_T *ic) {
       sqlite3_finalize(stmt);
     }
     if (debugging()) {
-      fprintf(stderr, "<< insert_indexcol - %s\n", (ret == 0 ? "SUCCESS":"FAILURE"));
+      fprintf(stderr, "<< insert_indexcol - %s\n",
+                      (ret == 0 ? "SUCCESS":"FAILURE"));
     }
     return ret;
 }
@@ -845,7 +848,8 @@ static int insert_fkcol(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *fkc, int i) {
       sqlite3_finalize(stmt);
     }
     if (debugging()) {
-      fprintf(stderr, "<< insert_fkcol - %s\n", (ret == 0 ? "SUCCESS":"FAILURE"));
+      fprintf(stderr, "<< insert_fkcol - %s\n",
+                     (ret == 0 ? "SUCCESS":"FAILURE"));
     }
     return ret;
 }
@@ -1320,9 +1324,9 @@ extern RELATIONSHIP_T *db_relationships(void) {
                                           // relationship
                              " on m_n_tab.tabid=fk.tabid"
                              " where m_n_tab.tabid is null) f"
-                             " join tabFKcol fc"
+                             " left outer join tabFKcol fc"
                              " on fc.fkid=f.fkid"
-                             " join tabcolumn c"
+                             " left outer join tabcolumn c"
                              " on fc.colid=c.id"
                              " group by f.tabid,f.reftabid,f.name) z"
                              " join tabTable t1"
