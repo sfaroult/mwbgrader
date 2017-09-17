@@ -588,8 +588,9 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
                        case SYNTH_TABLE_FOREIGNKEY_NAME:
                             strncpy(G_fk.name, (char *)val, NAME_LEN);
                             if (G_debug) {
-                              fprintf(stderr, "xml - found foreign key name %s\n",
-                                              G_fk.name);
+                              fprintf(stderr,
+                                      "xml - found foreign key name %s\n",
+                                      G_fk.name);
                             }
                             break;
                        case SYNTH_TABLE_INDEX_INDEXCOLUMN_COLUMN_REFERENCEDCOLUMN:
@@ -613,15 +614,17 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
                        case SYNTH_TABLE_FOREIGNKEY_COLUMNS:
                             add_colfk(&fkcol_list, (char *)val);
                             if (G_debug) {
-                              fprintf(stderr, "xml - found foreign key column %s\n",
-                                              (char *)val);
+                              fprintf(stderr,
+                                      "xml - found foreign key column %s\n",
+                                       (char *)val);
                             }
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_REFERENCEDCOLUMNS:
                             add_refcolfk(&fkcol_list, (char *)val);
                             if (G_debug) {
-                              fprintf(stderr, "xml - found foreign key ref column %s\n",
-                                              (char *)val);
+                              fprintf(stderr,
+                                      "xml - found foreign key ref column %s\n",
+                                      (char *)val);
                             }
                             break;
                        case SYNTH_TABLE_INDICES:

@@ -17,7 +17,7 @@ extern int kw_search(int kwc, char *kwv[], char *w) {
   int   comp;
 
   if (kwv && kwc && w) {
-    fprintf(stderr, "Looking for %s\n", w);
+    //fprintf(stderr, "Looking for %s\n", w);
     while (start <= end){
       mid = (start + end) / 2;
       /*
@@ -32,7 +32,7 @@ extern int kw_search(int kwc, char *kwv[], char *w) {
          pos = mid;
          start = end + 1; // Found
       } else {
-        fprintf(stderr, "comp = %d start = %d, end = %d\n", comp, start, end);
+        //fprintf(stderr, "comp = %d start = %d, end = %d\n", comp, start, end);
         if (comp < 0) {  // Searched word comes after word @mid
            // s1 < s2
            start = mid + 1;
@@ -40,8 +40,8 @@ extern int kw_search(int kwc, char *kwv[], char *w) {
            // s1 > s2
            end = mid - 1;
         }
-        fprintf(stderr, "comp = %d start = %d (%s), end = %d (%s)\n",
-                comp, start, kwv[start], end, kwv[end]);
+        //fprintf(stderr, "comp = %d start = %d (%s), end = %d (%s)\n",
+        //        comp, start, kwv[start], end, kwv[end]);
       }
     }
   }

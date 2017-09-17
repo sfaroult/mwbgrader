@@ -850,13 +850,13 @@ static int insert_fkcol(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *fkc, int i) {
     return ret;
 }
 
-extern int insert_foreignkey(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *cols) {
+extern int insert_foreignkey(TABFOREIGNKEY_T *fk,
+                             COLFOREIGNKEY_T *cols) {
     COLFOREIGNKEY_T *c;
     int              i;
     sqlite3_stmt    *stmt;
     char            *ztail = NULL;
     char             ok = 0;
-    char             cols_done = 0;
 
     if (fk) {
       ok = 1;
@@ -910,7 +910,8 @@ extern int insert_foreignkey(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *cols) {
         char       insert_tab = 1;
 
         if (debugging()) {
-          fprintf(stderr, "No error but foreign key %s not inserted\n", fk->name);
+          fprintf(stderr, "No error but foreign key %s not inserted\n",
+                          fk->name);
         }
         memset(&t, 0, sizeof(TABTABLE_T));
         t.varid = fk->varid;
@@ -930,27 +931,29 @@ extern int insert_foreignkey(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *cols) {
           fprintf(stderr, "(FK) Insertion of %s: %s\n", t.id,
                               (insert_tab ? "FAILED" : "SUCCEEDED"));
         }
-        // Try again
+        // Try again, without columns
         if (insert_tab == 0) {
-          ok = (insert_foreignkey(fk, cols) != -1); 
-          cols_done = 1;
+          ok = (insert_foreignkey(fk, NULL) != -1); 
         } else {
           ok = 0;
         }
       }
       sqlite3_finalize(stmt);
       c = cols;
-      if (!cols_done && c) {
-        i = 1;
-        while (ok && c) {
-          ok = (insert_fkcol(fk, c, i) != -1);
-          c = c->next;
-          i++;
-        }
+      if (debugging()) {
+        fprintf(stderr, "  foreign key columns %s.\n",
+                        (c ? "known" : "unknown"));
+      }
+      i = 1;
+      while (ok && c) {
+        ok = (insert_fkcol(fk, c, i) != -1);
+        c = c->next;
+        i++;
       }
     }
     if (debugging()) {
-      fprintf(stderr, "<< insert_foreignkey - %s\n", (ok ? "SUCCESS":"FAILURE"));
+      fprintf(stderr, "<< insert_foreignkey - %s\n",
+                     (ok ? "SUCCESS":"FAILURE"));
     }
     return (ok ? 0 : -1);
 }
