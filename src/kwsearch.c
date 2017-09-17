@@ -9,7 +9,7 @@
 
 #include "kwsearch.h"
 
-extern int kw_search(int kwc, char *kwv[], char *w) {
+extern int kw_search(int kwc, char *kwv[], char *w, char * label) {
   int   start = 0;
   int   end = kwc - 1;
   int   mid;
@@ -17,31 +17,39 @@ extern int kw_search(int kwc, char *kwv[], char *w) {
   int   comp;
 
   if (kwv && kwc && w) {
-    //fprintf(stderr, "Looking for %s\n", w);
+#ifdef DEBUG
+    fprintf(stderr, "\n[%s] Looking for %s\n", label, w);
+#endif
     while (start <= end){
       mid = (start + end) / 2;
-      /*
-      fprintf(stderr, "Comparing %s@%d [%s@%d to %s@%d] to %s\n",
-              kwv[mid], mid,
-              kwv[start], start,
-              kwv[end], end,
-              w);
-     */
+#ifdef DEBUG
+      fprintf(stderr, "[%s] Comparing %s@%d [%s@%d to %s@%d] to %s\n",
+            label,
+            kwv[mid], mid,
+            kwv[start], start,
+            kwv[end], end,
+            w);
+#endif
       //                      s1      s2
       if ((comp = strcasecmp(kwv[mid], w)) == 0) {
-         pos = mid;
-         start = end + 1; // Found
+        pos = mid;
+        start = end + 1; // Found
       } else {
-        //fprintf(stderr, "comp = %d start = %d, end = %d\n", comp, start, end);
+#ifdef DEBUG
+        fprintf(stderr, "[%s] comp = %d start = %d, end = %d\n",
+                label, comp, start, end);
+#endif
         if (comp < 0) {  // Searched word comes after word @mid
-           // s1 < s2
-           start = mid + 1;
+          // s1 < s2
+          start = mid + 1;
         } else {
-           // s1 > s2
-           end = mid - 1;
+          // s1 > s2
+          end = mid - 1;
         }
-        //fprintf(stderr, "comp = %d start = %d (%s), end = %d (%s)\n",
-        //        comp, start, kwv[start], end, kwv[end]);
+#ifdef DEBUG
+        fprintf(stderr, "[%s] comp = %d start = %d (%s), end = %d (%s)\n",
+                label, comp, start, kwv[start], end, kwv[end]);
+#endif
       }
     }
   }

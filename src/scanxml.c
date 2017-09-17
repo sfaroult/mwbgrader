@@ -242,7 +242,7 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
               strncpy(catpath, catpath_keyword(G_status[G_lvl].catpath),
                         SYNTH_ID_LEN);
 #endif
-              strncat(catpath, "_", SYNTH_ID_LEN - 1 - strlen(catpath));
+              strncat(catpath, "|", SYNTH_ID_LEN - 1 - strlen(catpath));
             }
             strncat(catpath, G_category[i],
                     SYNTH_ID_LEN - strlen(catpath) - strlen(G_category[i]));
@@ -301,7 +301,7 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
           while (*p) {
             fputc(toupper(*p++), fpsynth);
           }
-          fputc('_', fpsynth);
+          fputc('|', fpsynth);
           p = (char *)v;
           while (*p) {
             fputc(toupper(*p++), fpsynth);
@@ -330,15 +330,15 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
                  break;
             default:
                  snprintf(synth_id, SYNTH_ID_LEN,
-                          "%s_%s",
+                          "%s|%s",
                           catpath_keyword(G_status[G_lvl].catpath),
                           (char *)v);
                  if (G_debug) {
-                   fprintf(stderr, " - %s (", synth_id);
+                   fprintf(stderr, " - %s ", synth_id);
                  }
                  G_status[G_lvl].key = synth_search(synth_id);
                  if (G_debug) {
-                   fprintf(stderr, "%d)\n", G_status[G_lvl].key);
+                   fprintf(stderr, "(%d)\n", G_status[G_lvl].key);
                  }
                  break;
           }

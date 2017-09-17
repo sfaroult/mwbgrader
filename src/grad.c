@@ -29,7 +29,7 @@ static char *G_grad_words[] = {
     NULL};
 
 extern int grad_search(char *w) {
-  return kw_search(GRAD_COUNT, G_grad_words, w);
+  return kw_search(GRAD_COUNT, G_grad_words, w, "grad");
 }
 
 extern char *grad_keyword(int code) {

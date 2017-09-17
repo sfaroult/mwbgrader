@@ -8,17 +8,17 @@
 static char *G_catpath_words[] = {
     "FOREIGNKEY",
     "TABLE",
-    "TABLE_COLUMN",
-    "TABLE_FOREIGNKEY",
-    "TABLE_FOREIGNKEY_INDEX",
-    "TABLE_FOREIGNKEY_TABLE",
-    "TABLE_INDEX",
-    "TABLE_INDEX_INDEXCOLUMN",
-    "TABLE_INDEX_INDEXCOLUMN_COLUMN",
+    "TABLE|COLUMN",
+    "TABLE|FOREIGNKEY",
+    "TABLE|FOREIGNKEY|INDEX",
+    "TABLE|FOREIGNKEY|TABLE",
+    "TABLE|INDEX",
+    "TABLE|INDEX|INDEXCOLUMN",
+    "TABLE|INDEX|INDEXCOLUMN|COLUMN",
     NULL};
 
 extern int catpath_search(char *w) {
-  return kw_search(CATPATH_COUNT, G_catpath_words, w);
+  return kw_search(CATPATH_COUNT, G_catpath_words, w, "catpath");
 }
 
 extern char *catpath_keyword(int code) {

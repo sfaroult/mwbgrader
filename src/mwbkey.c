@@ -83,7 +83,7 @@ static char *G_mwbkey_words[] = {
     NULL};
 
 extern int mwbkey_search(char *w) {
-  return kw_search(MWBKEY_COUNT, G_mwbkey_words, w);
+  return kw_search(MWBKEY_COUNT, G_mwbkey_words, w, "mwbkey");
 }
 
 extern char *mwbkey_keyword(int code) {
