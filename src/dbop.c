@@ -332,7 +332,7 @@ extern int insert_table(TABTABLE_T *t) {
       }
       _must_succeed("insert table",
                     sqlite3_prepare_v2(G_db,
-                                "insert into tabTable(mwb_id,"
+                                "insert or ignore into tabTable(mwb_id,"
                                 "name,comment_len,varid)"
                                 " values(ltrim(rtrim(?1,'}'),'{'),lower(?2),?3,?4)",
                                 -1, 
