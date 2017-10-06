@@ -332,12 +332,12 @@ extern int insert_table(TABTABLE_T *t) {
       }
       _must_succeed("insert table",
                     sqlite3_prepare_v2(G_db,
-                                "insert or ignore into tabTable(mwb_id,"
-                                "name,comment_len,varid)"
-                                " values(ltrim(rtrim(?1,'}'),'{'),lower(?2),?3,?4)",
-                                -1, 
-                                &stmt,
-                                (const char **)&ztail));
+                        "insert into tabTable(mwb_id,"
+                        "name,comment_len,varid)"
+                        " values(ltrim(rtrim(?1,'}'),'{'),lower(?2),?3,?4)",
+                        -1, 
+                        &stmt,
+                        (const char **)&ztail));
       if ((sqlite3_bind_text(stmt, 1,
                             (const char*)t->id, -1,
                             SQLITE_STATIC) != SQLITE_OK)
@@ -883,6 +883,9 @@ extern int insert_foreignkey(TABFOREIGNKEY_T *fk,
                                 -1, 
                                 &stmt,
                                 (const char **)&ztail));
+      if (debugging()) {
+        fprintf(stderr, "insert_foreignkey - prepare OK\n");
+      }
       if ((sqlite3_bind_text(stmt, 1,
                             (const char*)fk->id, -1,
                             SQLITE_STATIC) != SQLITE_OK)
@@ -897,12 +900,15 @@ extern int insert_foreignkey(TABFOREIGNKEY_T *fk,
                                 SQLITE_STATIC) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 5, (int)fk->varid) != SQLITE_OK)
           || (sqlite3_step(stmt) != SQLITE_DONE)) {
+        if (debugging()) {
+          fprintf(stderr, "insert_foreignkey - bind or step failed\n");
+        }
         if ((sqlite3_errcode(G_db) != SQLITE_CONSTRAINT)
             || (sqlite3_extended_errcode(G_db) != SQLITE_CONSTRAINT_UNIQUE)) {
           fprintf(stderr, "Failure inserting foreign key\n");
           fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
-          ok = 0;
         }
+        ok = 0;
       } else {
         if (debugging()) {
           fprintf(stderr, "-- Insertion of foreign key %s worked\n", fk->name);
