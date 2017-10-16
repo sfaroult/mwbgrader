@@ -318,28 +318,28 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
           }
           fputc('\n', fpcatpath);
 #else
-          if (G_debug) {
-            fprintf(stderr, "looking for %s ", (char *)v);
-          }
+          //if (G_debug) {
+          //  fprintf(stderr, "looking for %s ", (char *)v);
+          //}
           keyid = mwbkey_search((char *)v);
           switch(keyid) {
             case MWBKEY_NOT_FOUND:
-                 if (G_debug) {
-                   fprintf(stderr, "NOT FOUND\n");
-                 }
+                 //if (G_debug) {
+                 //  fprintf(stderr, "NOT FOUND\n");
+                 //}
                  break;
             default:
                  snprintf(synth_id, SYNTH_ID_LEN,
                           "%s|%s",
                           catpath_keyword(G_status[G_lvl].catpath),
                           (char *)v);
-                 if (G_debug) {
-                   fprintf(stderr, " - %s ", synth_id);
-                 }
+                 //if (G_debug) {
+                 //  fprintf(stderr, " - %s ", synth_id);
+                 //}
                  G_status[G_lvl].key = synth_search(synth_id);
-                 if (G_debug) {
-                   fprintf(stderr, "(%d)\n", G_status[G_lvl].key);
-                 }
+                 //if (G_debug) {
+                 //  fprintf(stderr, "(%d)\n", G_status[G_lvl].key);
+                 //}
                  break;
           }
 #endif
@@ -533,6 +533,19 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
                      cat = G_status[G_lvl].cat;
                      val = xmlTextReaderConstValue(reader);
                      switch (getCatKey) {
+                       case SYNTH_TABLE_LASTCHANGEDATE:
+                            if (val && *val) {
+                              v = (char *)val;
+                              strncpy(G_tab.last_change, v, DATE_LEN);
+                            }
+                            break;
+                       case SYNTH_TABLE_CREATEDATE:
+                            if (val && *val
+                                && (G_tab.last_change[0] == '\0')) {
+                              v = (char *)val;
+                              strncpy(G_tab.last_change, v, DATE_LEN);
+                            }
+                            break;
                        case SYNTH_TABLE_COLUMN_COMMENT:
                             if (val && *val) {
                               v = (char *)val;

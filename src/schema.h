@@ -5,11 +5,13 @@
 #define ID_LEN      50
 #define NAME_LEN    64
 #define TYPE_LEN    20
+#define DATE_LEN    20 
 
 typedef struct tabtable {
             short varid;
             char  id[ID_LEN];
             char  name[NAME_LEN];
+            char  last_change[DATE_LEN];
             short comment_len;
           } TABTABLE_T;
 

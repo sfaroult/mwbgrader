@@ -130,6 +130,7 @@ static char *G_refddl[] =
              "    varid       int not null,"
              "    mwb_id      varchar(50) not null unique,"
              "    name        varchar(64) not null,"
+             "    last_change date,"
              "    comment_len int default 0,"
              "    constraint tabTable_fk foreign key(varid)"
              "               references tabVariant(id),"
@@ -147,6 +148,7 @@ static char *G_ddl[] =
              "    refid       int,"  // Matching table in the reference
              "    mwb_id      varchar(50) not null unique,"
              "    name        varchar(64) not null,"
+             "    last_change date,"
              "    comment_len int default 0,"
              "    constraint tabTable_u1"
              "       unique (name, varid),"
@@ -172,7 +174,8 @@ static char *G_ddl[] =
              "    constraint tabColumn_u2"
              "       unique (tabid, name),"
              "    constraint tabColumn_fk"
-             "       foreign key(tabid) references tabTable(id))",
+             "       foreign key(tabid) references tabTable(id)"
+             "          on delete cascade)",
              "create table tabIndex"
              "   (id            integer primary key,"
              "    mwb_id        varchar(50) not null,"
@@ -185,7 +188,8 @@ static char *G_ddl[] =
              "    constraint tabIndex_u2"
              "       unique(name, tabid),"
              "    constraint tabIndex_fk"
-             "       foreign key(tabid) references tabTable(id))",
+             "       foreign key(tabid) references tabTable(id)"
+             "          on delete cascade)",
              "create table tabIndexCol"
              "   (idxid         int not null,"
              "    colid         int not null,"
@@ -193,7 +197,8 @@ static char *G_ddl[] =
              "    constraint tabIndexCol_pk"
              "       primary key(idxid, colid),"
              "    constraint tabIndexCol_fk1"
-             "       foreign key(idxid) references tabIndex(id),"
+             "       foreign key(idxid) references tabIndex(id)"
+             "            on delete cascade,"
              "    constraint tabIndexCol_fk2"
              "       foreign key(colid) references tabColumn(id))",
              "create table tabForeignKey"
@@ -207,9 +212,11 @@ static char *G_ddl[] =
              "    constraint tabForeignKey_u2"
              "       unique(mwb_id,tabid),"
              "    constraint tabForeignKey_fk1"
-             "       foreign key(tabid) references tabTable(id),"
+             "       foreign key(tabid) references tabTable(id)"
+             "          on delete cascade,"
              "    constraint tabForeignKey_fk2"
-             "       foreign key(reftabid) references tabTable(id))",
+             "       foreign key(reftabid) references tabTable(id)"
+             "          on delete cascade)",
              "create table tabFKCol"
              "   (fkid          int not null,"
              "    colid         int not null,"
@@ -218,7 +225,8 @@ static char *G_ddl[] =
              "    constraint tabFKcol_pk"
              "       primary key(fkid,colid),"
              "    constraint tabFKCol_fk1"
-             "       foreign key(fkid) references tabForeignKey(id),"
+             "       foreign key(fkid) references tabForeignKey(id)"
+             "          on delete cascade,"
              "    constraint tabFKCol_fk2"
              "       foreign key(colid) references tabColumn(id),"
              "    constraint tabFKCol_fk3"
@@ -320,6 +328,148 @@ extern short insert_variant_test(short varid, int testid, char pass) {
     return ret;
 }
 
+static int purge_table(TABTABLE_T *t) {
+    // Remove any older table the name of which
+    // would conflict with the current one -
+    // or the current one if it happens to be the oldest.
+    // Returns 0 if older table deleted as intended,
+    // 1 if current table purged, and -1 if error
+    sqlite3_stmt *stmt = NULL;
+    char         *ztail = NULL;
+    int           ret = -1;
+    int           fail = 1;
+
+    if (t) {
+      ret = 0;
+      fail = 0;
+      if (debugging()) {
+        fprintf(stderr, ">> purge_table(%s[%s])\n", t->id, t->name);
+      }
+      _must_succeed("delete table",
+               sqlite3_prepare_v2(G_db,
+                            "delete from tabTable"
+                            " where name=lower(?1)"
+                            " and varid=?2"
+                            " and last_change<?3"
+                            " and mwb_id<>ltrim(rtrim(?4,'}'),'{')",
+                            -1, 
+                            &stmt,
+                            (const char **)&ztail));
+      if ((sqlite3_bind_text(stmt, 1,
+                            (const char*)t->name, -1,
+                            SQLITE_STATIC) != SQLITE_OK)
+           || (sqlite3_bind_int(stmt, 2, (int)t->varid) != SQLITE_OK)
+           || (sqlite3_bind_text(stmt, 3,
+                            (const char*)t->last_change, -1,
+                            SQLITE_STATIC) != SQLITE_OK)
+           || (sqlite3_bind_text(stmt, 4,
+                        (const char*)t->id, -1,
+                        SQLITE_STATIC) != SQLITE_OK)
+           || (sqlite3_step(stmt) != SQLITE_DONE)) {
+        fail = 1;
+      } else {
+        // Check if we actually deleted something
+        // If not, then it was refers to the current table
+        // that should be deleted
+        if (sqlite3_changes(G_db) == 0) {
+          sqlite3_finalize(stmt);
+          _must_succeed("delete table 2",
+               sqlite3_prepare_v2(G_db,
+                            "delete from tabTable"
+                            " where varid=?1"
+                            " and mwb_id=ltrim(rtrim(?2,'}'),'{')",
+                            -1, 
+                            &stmt,
+                            (const char **)&ztail));
+          if ((sqlite3_bind_int(stmt, 1, (int)t->varid) != SQLITE_OK)
+              || (sqlite3_bind_text(stmt, 2,
+                        (const char*)t->id, -1,
+                        SQLITE_STATIC) != SQLITE_OK)
+              || (sqlite3_step(stmt) != SQLITE_DONE)) {
+            fail = 1;
+          } else {
+            ret = 1;
+          }
+        }
+      }
+      if (fail) {
+        if (strcmp(t->name, t->id)) {
+          fprintf(stderr, "Failure updating table\n");
+          fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                        sqlite3_errmsg(G_db),
+                        sqlite3_errcode(G_db),
+                        sqlite3_extended_errcode(G_db));
+        } else {
+          if (debugging()) {
+            fprintf(stderr, " %s [%s] already known\n", t->id, t->name);
+          }
+        }
+        ret = -1;
+      }
+      sqlite3_finalize(stmt);
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< purge_table - %s\n",
+                      (ret != -1 ? "SUCCESS":"FAILURE"));
+    }
+    return ret;
+}
+
+static int update_table(TABTABLE_T *t) {
+    sqlite3_stmt *stmt = NULL;
+    char         *ztail = NULL;
+    int           ret = -1;
+    int           fail = 0;
+
+    if (t) {
+      ret = 0;
+      if (debugging()) {
+        fprintf(stderr, ">> update_table(%s[%s])\n", t->id, t->name);
+      }
+      _must_succeed("update table",
+               sqlite3_prepare_v2(G_db,
+                            "update tabTable"
+                            " set name=lower(?1),"
+                            "     comment_len=?2"
+                            " where varid=?3"
+                            " and mwb_id=ltrim(rtrim(?4,'}'),'{')",
+                            -1, 
+                            &stmt,
+                            (const char **)&ztail));
+      if ((sqlite3_bind_text(stmt, 1,
+                            (const char*)t->name, -1,
+                            SQLITE_STATIC) != SQLITE_OK)
+           || (sqlite3_bind_int(stmt, 2, (int)t->comment_len) != SQLITE_OK)
+           || (sqlite3_bind_int(stmt, 3, (int)t->varid) != SQLITE_OK)
+           || (sqlite3_bind_text(stmt, 4,
+                        (const char*)t->id, -1,
+                        SQLITE_STATIC) != SQLITE_OK)
+           || (sqlite3_step(stmt) != SQLITE_DONE)) {
+        fail = (purge_table(t) == -1); 
+      }
+      if (fail) {
+        if (strcmp(t->name, t->id)) {
+          fprintf(stderr, "Failure updating table\n");
+          fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                        sqlite3_errmsg(G_db),
+                        sqlite3_errcode(G_db),
+                        sqlite3_extended_errcode(G_db));
+        } else {
+          if (debugging()) {
+            fprintf(stderr, " %s [%s] already known\n", t->id, t->name);
+          }
+        }
+        ret = -1;
+      }
+      sqlite3_finalize(stmt);
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< update_table - %s\n",
+                      (ret == 0 ? "SUCCESS":"FAILURE"));
+    }
+    return ret;
+}
+
 extern int insert_table(TABTABLE_T *t) {
     sqlite3_stmt *stmt;
     char         *ztail = NULL;
@@ -351,29 +501,7 @@ extern int insert_table(TABTABLE_T *t) {
         if ((sqlite3_errcode(G_db) == SQLITE_CONSTRAINT)
             && (sqlite3_extended_errcode(G_db) == SQLITE_CONSTRAINT_UNIQUE)
             && (strcmp(t->name, t->id) != 0)) {
-          fail = 0; 
-          sqlite3_finalize(stmt);
-          _must_succeed("update table",
-                    sqlite3_prepare_v2(G_db,
-                                "update tabTable"
-                                " set name=lower(?1),"
-                                "     comment_len=?2"
-                                " where varid=?3"
-                                " and mwb_id=ltrim(rtrim(?4,'}'),'{')",
-                                -1, 
-                                &stmt,
-                                (const char **)&ztail));
-          if ((sqlite3_bind_text(stmt, 1,
-                                (const char*)t->name, -1,
-                                SQLITE_STATIC) != SQLITE_OK)
-               || (sqlite3_bind_int(stmt, 2, (int)t->comment_len) != SQLITE_OK)
-               || (sqlite3_bind_int(stmt, 3, (int)t->varid) != SQLITE_OK)
-               || (sqlite3_bind_text(stmt, 4,
-                            (const char*)t->id, -1,
-                            SQLITE_STATIC) != SQLITE_OK)
-               || (sqlite3_step(stmt) != SQLITE_DONE)) {
-            fail = 1;
-          }
+          fail = (update_table(t) == -1); 
         }
         if (fail) {
           if (strcmp(t->name, t->id)) {
@@ -1278,7 +1406,7 @@ extern RELATIONSHIP_T *db_relationships(void) {
 
     if (G_db) {
       rc = sqlite3_prepare_v2(G_db,
-                             "select t1.name as tablename1,"
+                             "select distinct t1.name as tablename1,"
                              "  cardinality,"
                              "  t2.name as tablename2"
                              " from (select case dummy.n"
