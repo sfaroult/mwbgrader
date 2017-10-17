@@ -332,7 +332,7 @@ static int purge_table(TABTABLE_T *t) {
     // Remove any older table the name of which
     // would conflict with the current one -
     // or the current one if it happens to be the oldest.
-    // Returns 0 if older table deleted as intended,
+    // Returns 0 if another, older table was deleted as intended,
     // 1 if current table purged, and -1 if error
     sqlite3_stmt *stmt = NULL;
     char         *ztail = NULL;
@@ -369,7 +369,7 @@ static int purge_table(TABTABLE_T *t) {
         fail = 1;
       } else {
         // Check if we actually deleted something
-        // If not, then it was refers to the current table
+        // If not, then it's what refers to the current table
         // that should be deleted
         if (sqlite3_changes(G_db) == 0) {
           sqlite3_finalize(stmt);
@@ -420,6 +420,7 @@ static int update_table(TABTABLE_T *t) {
     char         *ztail = NULL;
     int           ret = -1;
     int           fail = 0;
+    int           which;
 
     if (t) {
       ret = 0;
@@ -445,7 +446,12 @@ static int update_table(TABTABLE_T *t) {
                         (const char*)t->id, -1,
                         SQLITE_STATIC) != SQLITE_OK)
            || (sqlite3_step(stmt) != SQLITE_DONE)) {
-        fail = (purge_table(t) == -1); 
+        which = purge_table(t); 
+        fail = (which == -1); 
+        if (which == 0) { // Another table was purged
+          // Do it again
+          fail = (update_table(t) == -1);
+        }
       }
       if (fail) {
         if (strcmp(t->name, t->id)) {
@@ -708,6 +714,142 @@ extern int insert_column(TABCOLUMN_T *c) {
     return (ok ? 0 : -1);
 }
 
+/*
+static TABTABLE_T *index_table(TABINDEX_T *i) {
+    // Retrieve data for the table associated
+    // with the index.
+    TABTABLE_T   *t = NULL;
+    sqlite3_stmt *stmt;
+    char         *ztail = NULL;
+    int           rc;
+
+    if (i
+        && G_db
+        && ((t = (TABTABLE_T *)malloc(sizeof(TABTABLE_T))) != NULL)) {
+      if (debugging()) {
+        fprintf(stderr, ">> index_table(%s[%s]) table %s\n",
+                        i->id, i->name, i->tabid);
+      }
+      t->varid = i->varid;
+      strncpy(t->id, i->tabid, ID_LEN);
+      rc = sqlite3_prepare_v2(G_db,
+                              "select name,last_change,comment_len"
+                              " from tabTable"
+                              " where varid=?1"
+                              " and mwb_id=?2",
+                              -1, 
+                              &stmt,
+                              (const char **)&ztail);
+      if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failure index_table() query\n");
+        fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
+        free(t);
+        return NULL;
+      }
+      if (debugging()) {
+        fprintf(stderr, "   binding and fetching\n");
+      }
+      if ((sqlite3_bind_int(stmt, 1, (int)t->varid) == SQLITE_OK)
+          && (sqlite3_bind_text(stmt, 2,
+                                (const char*)t->id, -1,
+                                SQLITE_STATIC) == SQLITE_OK)
+          && (sqlite3_step(stmt) == SQLITE_ROW)) {
+        if (debugging()) {
+          fprintf(stderr, "   got row\n");
+        }
+        strncpy(t->name,
+                (char *)sqlite3_column_text(stmt, 0),
+                NAME_LEN);
+        if (debugging()) {
+          fprintf(stderr, "   name: %s\n", t->name);
+        }
+        strncpy(t->last_change,
+                (char *)sqlite3_column_text(stmt, 1),
+                DATE_LEN);
+        if (debugging()) {
+          fprintf(stderr, "   last_change: %s\n", t->last_change);
+        }
+        t->comment_len = (short)sqlite3_column_int(stmt,
+                                 2); // Not really useful
+      } else {
+        fprintf(stderr, "Failure executing index_table() query\n");
+        fprintf(stderr, "%s\n", sqlite3_errmsg(G_db));
+        free(t);
+        t = NULL;
+      }
+      if (debugging()) {
+        fprintf(stderr, "   finalizing\n");
+      }
+      sqlite3_finalize(stmt);
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< index_table - %s\n", (t ? "table ptr":"NULL"));
+    }
+    return t;
+}
+*/
+
+static int update_index(TABINDEX_T *i) {
+    sqlite3_stmt *stmt;
+    char         *ztail = NULL;
+    int           ret = -1;
+    int           fail = 0;
+
+    if (i && G_db) {
+      ret = 0;
+      if (debugging()) {
+        fprintf(stderr, ">> update_index(%s[%s]) table %s\n",
+                        i->id, i->name, i->tabid);
+      }
+      _must_succeed("update index",
+                    sqlite3_prepare_v2(G_db,
+                                "update or ignore tabIndex"
+                                " set name=lower(?1),"
+                                "     isPrimary=?2,"
+                                "     isUnique=?3"
+                                " where tabid=(select id from tabTable"
+                                "     where varid=?4"
+                                "       and mwb_id=ltrim(rtrim(?5,'}'),'{'))"
+                                " and mwb_id=ltrim(rtrim(?6,'}'),'{')",
+                                -1, 
+                                &stmt,
+                                (const char **)&ztail));
+      if ((sqlite3_bind_text(stmt, 1,
+                             (const char*)&(i->name), 1,
+                             SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_text(stmt, 2,
+                                (const char*)&(i->isprimary), 1,
+                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_text(stmt, 3,
+                                (const char*)&(i->isunique), 1,
+                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 4, (int)i->varid) != SQLITE_OK)
+          || (sqlite3_bind_text(stmt, 5,
+                                (const char*)i->tabid, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_text(stmt, 6,
+                                (const char*)i->id, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_step(stmt) != SQLITE_DONE)) {
+        fail = 1;
+      }
+      if (fail) {
+        fprintf(stderr, "Failure updating index\n");
+        fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                        sqlite3_errmsg(G_db),
+                        sqlite3_errcode(G_db),
+                        sqlite3_extended_errcode(G_db));
+        ret = -1;
+      }
+      sqlite3_finalize(stmt);
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< update_index - %s\n",
+                      (ret != -1 ? "SUCCESS":"FAILURE"));
+    }
+    return ret;
+}
+
 extern int insert_index(TABINDEX_T *i) {
     sqlite3_stmt *stmt;
     char         *ztail = NULL;
@@ -749,40 +891,7 @@ extern int insert_index(TABINDEX_T *i) {
         char fail = 1;
         if ((sqlite3_errcode(G_db) == SQLITE_CONSTRAINT)
             && (sqlite3_extended_errcode(G_db) == SQLITE_CONSTRAINT_UNIQUE)) {
-          fail = 0; 
-          sqlite3_finalize(stmt);
-          _must_succeed("update index",
-                    sqlite3_prepare_v2(G_db,
-                                "update tabIndex"
-                                " set name=lower(?1),"
-                                "     isPrimary=?2,"
-                                "     isUnique=?3"
-                                " where tabid=(select id from tabTable"
-                                "     where varid=?4"
-                                "       and mwb_id=ltrim(rtrim(?5,'}'),'{'))"
-                                " and mwb_id=ltrim(rtrim(?6,'}'),'{')",
-                                -1, 
-                                &stmt,
-                                (const char **)&ztail));
-          if ((sqlite3_bind_text(stmt, 1,
-                                (const char*)i->name, -1,
-                                SQLITE_STATIC) != SQLITE_OK)
-               || (sqlite3_bind_text(stmt, 2,
-                                (const char*)&(i->isprimary), 1,
-                                SQLITE_STATIC) != SQLITE_OK)
-               || (sqlite3_bind_text(stmt, 3,
-                                (const char*)&(i->isunique), 1,
-                                SQLITE_STATIC) != SQLITE_OK)
-               || (sqlite3_bind_int(stmt, 4, (int)i->varid) != SQLITE_OK)
-               || (sqlite3_bind_text(stmt, 5,
-                                (const char*)i->tabid, -1,
-                                SQLITE_STATIC) != SQLITE_OK)
-               || (sqlite3_bind_text(stmt, 6,
-                                (const char*)i->id, -1,
-                                SQLITE_STATIC) != SQLITE_OK)
-               || (sqlite3_step(stmt) != SQLITE_DONE)) {
-            fail = 1;
-          }
+          fail = (update_index(i) == -1);
         }
         if (fail) {
           fprintf(stderr, "Failure inserting/updating index\n");
@@ -1433,7 +1542,7 @@ extern RELATIONSHIP_T *db_relationships(void) {
                              " cross join (select 1 as n"
                              "   union all"
                              "   select 2 as n) dummy"
-                             " union all"
+                             " union"
                              " select f.reftabid as tabid1,"
                              "  case sum(c.isnotnull)"
                              "  when 0 then '0 to many'"
