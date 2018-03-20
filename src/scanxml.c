@@ -397,9 +397,12 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
                      //   fprintf(stderr, "Calling checkAttr()\n");
                      // }
                      getCatKey = checkAttr(reader, name);
-                     // if (G_debug) {
-                     //   fprintf(stderr, "back from checkAttr()\n");
-                     // }
+                     if (G_debug) {
+                       if (synth_keyword(getCatKey)) {
+                         fprintf(stderr, "checkAttr() returns %s\n",
+                                 synth_keyword(getCatKey));
+                       }
+                     }
 #ifndef SETUP
                      if (G_status[G_lvl].catpath != prevCatPath) {
                        // if (G_debug) {
@@ -532,74 +535,62 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
                      char *v;
                      cat = G_status[G_lvl].cat;
                      val = xmlTextReaderConstValue(reader);
+                     if (val && *val) {
+                       v = (char *)val;
+                       while (isspace(*v)) {
+                         v++;
+                       }
+                     }
                      switch (getCatKey) {
                        case SYNTH_TABLE_LASTCHANGEDATE:
                             if (val && *val) {
-                              v = (char *)val;
                               strncpy(G_tab.last_change, v, DATE_LEN);
                             }
                             break;
                        case SYNTH_TABLE_CREATEDATE:
                             if (val && *val
                                 && (G_tab.last_change[0] == '\0')) {
-                              v = (char *)val;
                               strncpy(G_tab.last_change, v, DATE_LEN);
                             }
                             break;
                        case SYNTH_TABLE_COLUMN_COMMENT:
                             if (val && *val) {
-                              v = (char *)val;
-                              while (isspace(*v)) {
-                                v++;
-                              }
                               G_col.comment_len = strlen(v);
                             }
                             break;
                        case SYNTH_TABLE_COMMENT:
                             if (val && *val) {
-                              v = (char *)val;
-                              while (isspace(*v)) {
-                                v++;
-                              }
                               G_tab.comment_len = strlen(v);
                             }
                             break;
                        case SYNTH_TABLE_COLUMN_AUTOINCREMENT:
-                            G_col.autoinc = (char)*val;
+                            G_col.autoinc = (short)(*v - '0');
                             break;
                        case SYNTH_TABLE_COLUMN_DEFAULTVALUE:
                             if (val) {
-                              G_col.defaultvalue = strdup((char *)val);
+                              G_col.defaultvalue = strdup(v);
                             }
                             break;
                        case SYNTH_TABLE_COLUMN_ISNOTNULL:
-                            G_col.isnotnull = (char)*val;
+                            G_col.isnotnull = (short)(*v - '0');
                             break;
                        case SYNTH_TABLE_COLUMN_LENGTH:
-                            (void)sscanf((char *)val,
-                                         "%hd",
-                                         &G_col.collength);
+                            (void)sscanf(v, "%hd", &G_col.collength);
                             break;
                        case SYNTH_TABLE_COLUMN_NAME:
-                            strncpy(G_col.name, (char *)val, NAME_LEN);
+                            strncpy(G_col.name, v, NAME_LEN);
                             break;
                        case SYNTH_TABLE_COLUMN_PRECISION:
-                            (void)sscanf((char *)val,
-                                         "%hd",
-                                         &G_col.precision);
+                            (void)sscanf(v, "%hd", &G_col.precision);
                             break;
                        case SYNTH_TABLE_COLUMN_SCALE:
-                            (void)sscanf((char *)val,
-                                         "%hd",
-                                         &G_col.scale);
+                            (void)sscanf(v, "%hd", &G_col.scale);
                             break;
                        case SYNTH_TABLE_COLUMN_SIMPLETYPE:
-                            strncpy(G_col.datatype,
-                                    _short((char *)val),
-                                    TYPE_LEN);
+                            strncpy(G_col.datatype, _short(v), TYPE_LEN);
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_NAME:
-                            strncpy(G_fk.name, (char *)val, NAME_LEN);
+                            strncpy(G_fk.name, v, NAME_LEN);
                             if (G_debug) {
                               fprintf(stderr,
                                       "xml - found foreign key name %s\n",
@@ -607,46 +598,46 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
                             }
                             break;
                        case SYNTH_TABLE_INDEX_INDEXCOLUMN_COLUMN_REFERENCEDCOLUMN:
-                            strncpy(G_idxcol.colid, (char *)val, ID_LEN);
+                            strncpy(G_idxcol.colid, v, ID_LEN);
                             G_idxcol.seq = seq++;
                             break;
                        case SYNTH_TABLE_INDEX_INDEXCOLUMN_NAME:
-                            strncpy(G_idxcol.idxid, (char *)val, ID_LEN);
+                            strncpy(G_idxcol.idxid, v, ID_LEN);
                             break;
                        case SYNTH_TABLE_INDEX_ISPRIMARY:
-                            G_idx.isprimary = (char)*val;
+                            G_idx.isprimary = (short)(*v - '0');
                             break;
                        case SYNTH_TABLE_INDEX_NAME:
-                            strncpy(G_idx.name, (char *)val, NAME_LEN);
+                            strncpy(G_idx.name, v, NAME_LEN);
                             break;
                        case SYNTH_TABLE_INDEX_PRIMARYKEY:
                             break;
                        case SYNTH_TABLE_INDEX_UNIQUE:
-                            G_idx.isunique = (char)*val;
+                            G_idx.isunique = (short)(*v - '0');
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_COLUMNS:
-                            add_colfk(&fkcol_list, (char *)val);
+                            add_colfk(&fkcol_list, v);
                             if (G_debug) {
                               fprintf(stderr,
                                       "xml - found foreign key column %s\n",
-                                       (char *)val);
+                                       v);
                             }
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_REFERENCEDCOLUMNS:
-                            add_refcolfk(&fkcol_list, (char *)val);
+                            add_refcolfk(&fkcol_list, v);
                             if (G_debug) {
                               fprintf(stderr,
                                       "xml - found foreign key ref column %s\n",
-                                      (char *)val);
+                                      v);
                             }
                             break;
                        case SYNTH_TABLE_INDICES:
                             break;
                        case SYNTH_TABLE_NAME:
-                            strncpy(G_tab.name, (char *)val, NAME_LEN);
+                            strncpy(G_tab.name, v, NAME_LEN);
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_TABLE_REFERENCEDTABLE:
-                            strncpy(G_fk.reftabid, (char *)val, ID_LEN);
+                            strncpy(G_fk.reftabid, v, ID_LEN);
                             break;
                        default:
                             break;

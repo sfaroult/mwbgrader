@@ -22,9 +22,9 @@ typedef struct tabcolumn {
             char  name[NAME_LEN];
             short comment_len;
             char  datatype[TYPE_LEN];
-            char  autoinc;
+            short autoinc;
             char *defaultvalue;
-            char  isnotnull;
+            short isnotnull;
             short collength;
             short precision;
             short scale;
@@ -35,8 +35,8 @@ typedef struct tabindex {
             char  id[ID_LEN];
             char  tabid[ID_LEN];
             char  name[NAME_LEN];
-            char  isprimary;
-            char  isunique;
+            short isprimary;
+            short isunique;
           } TABINDEX_T;
 
 typedef struct tabindexcol {

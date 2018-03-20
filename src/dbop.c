@@ -552,8 +552,8 @@ extern int insert_column(TABCOLUMN_T *c) {
                                 " isNotNull,colLength,precision,scale,"
                                 " comment_len)"
                                 " select ltrim(rtrim(?1,'}'),'{'),id,"
-                                "lower(?3),lower(?4),?5,?6,"
-                                "?7,?8,?9,?10,?11"
+                                "lower(?3),lower(?4),cast(?5 as char),?6,"
+                                "cast(?7 as char),?8,?9,?10,?11"
                                 " from tabTable"
                                 " where mwb_id=ltrim(rtrim(?2,'}'),'{')"
                                 " and varid=?12",
@@ -572,12 +572,8 @@ extern int insert_column(TABCOLUMN_T *c) {
           || (sqlite3_bind_text(stmt, 4,
                                 (const char*)c->datatype, -1,
                                 SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_text(stmt, 5,
-                                (const char*)&(c->autoinc), 1,
-                                SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_text(stmt, 7,
-                                (const char*)&(c->isnotnull), 1,
-                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 5, (int)(c->autoinc)) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 7, (int)(c->isnotnull)) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 8, (int)c->collength) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 9, (int)c->precision) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 10, (int)c->scale) != SQLITE_OK)
@@ -613,9 +609,9 @@ extern int insert_column(TABCOLUMN_T *c) {
                                 "update tabColumn"
                                 " set name=lower(?1),"
                                 "     datatype=lower(?2),"
-                                "     autoInc=?3,"
+                                "     autoInc=cast(?3 as char),"
                                 "     defaultValue=?4,"
-                                "     isNotNull=?5,"
+                                "     isNotNull=cast(?5 as char),"
                                 "     collength=?6,"
                                 "     precision=?7,"
                                 "     scale=?8,"
@@ -639,12 +635,8 @@ extern int insert_column(TABCOLUMN_T *c) {
               || (sqlite3_bind_text(stmt, 2,
                                     (const char*)c->datatype, -1,
                                     SQLITE_STATIC) != SQLITE_OK)
-              || (sqlite3_bind_text(stmt, 3,
-                                    (const char*)&(c->autoinc), 1,
-                                    SQLITE_STATIC) != SQLITE_OK)
-              || (sqlite3_bind_text(stmt, 5,
-                                    (const char*)&(c->isnotnull), 1,
-                                    SQLITE_STATIC) != SQLITE_OK)
+              || (sqlite3_bind_int(stmt, 3, (int)(c->autoinc)) != SQLITE_OK)
+              || (sqlite3_bind_int(stmt, 5, (int)(c->isnotnull)) != SQLITE_OK)
               || (sqlite3_bind_int(stmt, 6, (int)c->collength) != SQLITE_OK)
               || (sqlite3_bind_int(stmt, 7, (int)c->precision) != SQLITE_OK)
               || (sqlite3_bind_int(stmt, 8, (int)c->scale) != SQLITE_OK)
@@ -798,15 +790,16 @@ static int update_index(TABINDEX_T *i) {
     if (i && G_db) {
       ret = 0;
       if (debugging()) {
-        fprintf(stderr, ">> update_index(%s[%s]) table %s\n",
-                        i->id, i->name, i->tabid);
+        fprintf(stderr, ">> update_index(%s[%s]) table %s unique: %hd\n",
+                        i->id, i->name, i->tabid, i->isunique);
       }
       _must_succeed("update index",
                     sqlite3_prepare_v2(G_db,
-                                "update or ignore tabIndex"
+                                //"update or ignore tabIndex"
+                                "update tabIndex"
                                 " set name=lower(?1),"
-                                "     isPrimary=?2,"
-                                "     isUnique=?3"
+                                "   isPrimary=max(cast(?2 as char),isPrimary),"
+                                "   isUnique=max(cast(?3 as char),isUnique)"
                                 " where tabid=(select id from tabTable"
                                 "     where varid=?4"
                                 "       and mwb_id=ltrim(rtrim(?5,'}'),'{'))"
@@ -814,15 +807,10 @@ static int update_index(TABINDEX_T *i) {
                                 -1, 
                                 &stmt,
                                 (const char **)&ztail));
-      if ((sqlite3_bind_text(stmt, 1,
-                             (const char*)&(i->name), 1,
+      if ((sqlite3_bind_text(stmt, 1, (const char*)i->name, -1,
                              SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_text(stmt, 2,
-                                (const char*)&(i->isprimary), 1,
-                                SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_text(stmt, 3,
-                                (const char*)&(i->isunique), 1,
-                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 2, (int)(i->isprimary)) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 3, (int)(i->isunique)) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 4, (int)i->varid) != SQLITE_OK)
           || (sqlite3_bind_text(stmt, 5,
                                 (const char*)i->tabid, -1,
@@ -858,14 +846,15 @@ extern int insert_index(TABINDEX_T *i) {
     if (i) {
       ret = 0;
       if (debugging()) {
-        fprintf(stderr, ">> insert_index(%s[%s]) table %s\n",
-                        i->id, i->name, i->tabid);
+        fprintf(stderr, ">> insert_index(%s[%s]) table %s - unique: %hd\n",
+                        i->id, i->name, i->tabid, i->isunique);
       }
       _must_succeed("insert index",
                     sqlite3_prepare_v2(G_db,
                        "insert into tabIndex(mwb_id,tabid,"
                        "name,isPrimary,isUnique)"
-                       " select ltrim(rtrim(?1,'}'),'{'),id,lower(?3),?4,?5"
+                       " select ltrim(rtrim(?1,'}'),'{'),id,lower(?3),"
+                       "cast(?4 as char),cast(?5 as char)"
                        " from tabTable where mwb_id=ltrim(rtrim(?2,'}'),'{')"
                        " and varid=?6",
                        -1, 
@@ -880,12 +869,8 @@ extern int insert_index(TABINDEX_T *i) {
           || (sqlite3_bind_text(stmt, 3,
                                 (const char*)i->name, -1,
                                 SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_text(stmt, 4,
-                                (const char*)&(i->isprimary), 1,
-                                SQLITE_STATIC) != SQLITE_OK)
-          || (sqlite3_bind_text(stmt, 5,
-                                (const char*)&(i->isunique), 1,
-                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 4, (int)(i->isprimary)) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 5, (int)(i->isunique)) != SQLITE_OK)
           || (sqlite3_bind_int(stmt, 6, (int)i->varid) != SQLITE_OK)
           || (sqlite3_step(stmt) != SQLITE_DONE)) {
         char fail = 1;
