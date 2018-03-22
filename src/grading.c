@@ -97,6 +97,7 @@ static GRADING_T G_grading[] =
               "      join tabColumn c"
               "        on c.tabid=t.id"
               " where c.autoinc='0'"
+              " and t.name not like '{%'"
               " group by t.name"
               " having max(c.IsNotNull)='0'"
               " order by 1",
@@ -105,6 +106,7 @@ static GRADING_T G_grading[] =
               "      join tabColumn c"
               "        on c.tabid=t.id"
               " where c.autoinc='0'"
+              " and t.name not like '{%'"
               " and t.varid=?1"
               " group by t.name"
               " having max(c.IsNotNull)='0'",
@@ -115,8 +117,10 @@ static GRADING_T G_grading[] =
               -1},
              {GRAD_NUMBER_OF_TABLES,
               "Required number of tables in the schema",
-              "select count(*) from tabTable",
-              "select count(*) from tabTable where varid=?1",
+              "select count(*) from tabTable"
+              " where name not like '{%'",
+              "select count(*) from tabTable where varid=?1"
+              " and name not like '{%'",
               SUB_ONCE | AT_LEAST,
               4,
               15.0,
@@ -144,6 +148,7 @@ static GRADING_T G_grading[] =
               " and fkc.colid=c.id"
               " where c.autoInc=0"
               " and t.varid=?1"
+              " and t.name not like '{%'"
               " and fkc.colid is null",
               SUB_ONCE | AT_LEAST,
               10,
@@ -165,6 +170,7 @@ static GRADING_T G_grading[] =
               "    union select 2) x) y"
               " on y.tabid=t.id"
               " where y.tabid is null"
+              " and t.name not like '{%'"
               " order by 1",
               "select count(*)"
               " from tabTable t"
@@ -179,6 +185,7 @@ static GRADING_T G_grading[] =
               "    union select 2) x) y"
               " on y.tabid=t.id"
               " where y.tabid is null"
+              " and t.name not like '{%'"
               " and t.varid=?1",
               SUB_EACH,
               0,
@@ -198,6 +205,8 @@ static GRADING_T G_grading[] =
               "  on t1.id=x.tabid"
               " join tabTable t2"
               "  on t2.id=x.reftabid"
+              " where t1.name not like '{%'"
+              " and t2.name not like '{%'"
               " order by 1",
               "select count(*)"
               " from (select tabid,reftabid,count(*) cnt"
@@ -209,6 +218,8 @@ static GRADING_T G_grading[] =
               " join tabTable t2"
               "  on t2.id=x.reftabid"
               " where t1.varid=?1"
+              " and t2.name not like '{%'"
+              " and t1.name not like '{%'"
               " and t2.varid=t1.varid",
               SUB_EACH,
               0,
@@ -221,6 +232,7 @@ static GRADING_T G_grading[] =
               " from tabTable t"
               "  join tabColumn c"
               "  on c.tabid=t.id"
+              " where t.name not like '{%'"
               " group by t.name"
               " having count(c.id)=1"
               " order by 1",
@@ -230,6 +242,7 @@ static GRADING_T G_grading[] =
               "   join tabColumn c"
               "   on c.tabid=t.id"
               "  where t.varid=?1"
+              "  and t.name not like '{%'"
               "  group by t.name"
               "  having count(c.id)=1) x",
               SUB_EACH,
@@ -262,6 +275,7 @@ static GRADING_T G_grading[] =
               "  join tabTable t"
               "  on t.id=i.tabid"
               " where t.varid=?1"
+              " and t.name not like '{%'"
               " group by  ic.idxid) x",
               SUB_ONCE | AT_MOST,
               99,
@@ -282,6 +296,7 @@ static GRADING_T G_grading[] =
               " on t.id=c.tabid"
               " where c.datatype='varchar'"
               " and t.varid=?1"
+              " and t.name not like '{%'"
               " group by c.datatype"
               " having count(distinct c.collength) = 1",
               SUB_ONCE,
@@ -304,6 +319,7 @@ static GRADING_T G_grading[] =
               " join tabTable t"
               " on t.id=x.tabid"
               " where datatype='varchar'"
+              " and t.name not like '{%'"
               " order by 1",
               "select count(*)"
               " from (select tabid,max(datatype) datatype,"
@@ -316,6 +332,7 @@ static GRADING_T G_grading[] =
               " join tabTable t"
               " on t.id=x.tabid"
               " where x.datatype='varchar'"
+              " and t.name not like '{%'"
               " and t.varid=?1",
               SUB_ONCE,
               0,
@@ -342,6 +359,7 @@ static GRADING_T G_grading[] =
               " and ic2.seq=1"
               " join tabTable t"
               " on t.id=i2.tabid"
+              " where t.name not like '{%'"
               " order by 1",
               "select count(*)" 
               " from (select i.name redundant_idx,"
@@ -360,7 +378,8 @@ static GRADING_T G_grading[] =
               " and ic2.seq=1"
               " join tabTable t"
               " on t.id=i2.tabid"
-              " where t.varid=?1",
+              " where t.varid=?1"
+              " and t.name not like '{%'",
               SUB_EACH,
               0,
               2.0,
@@ -376,6 +395,7 @@ static GRADING_T G_grading[] =
               "   where isPrimary=1 or isUnique=1) has_pk"
               " on has_pk.tabid=t.id"
               " where has_pk.tabid is null"
+              " and t.name not like '{%'"
               " order by 1",
               NULL,
               SUB_EACH,
@@ -437,6 +457,8 @@ static GRADING_T G_grading[] =
               " on t1.id=one2one.tabid"
               " join tabTable t2"
               " on t2.id=one2one.reftabid"
+              " where t1.name not like '{%'"
+              " and t2.name not like '{%'"
               " order by 1",
               "select count(*)"
               " from (select xx.tabid,xx.reftabid"
@@ -486,6 +508,8 @@ static GRADING_T G_grading[] =
               " join tabTable t2"
               " on t2.id=one2one.reftabid"
               " where t1.varid=?1"
+              " and t1.name not like '{%'"
+              " and t2.name not like '{%'"
               " and t2.varid=t1.varid",
               SUB_EACH,
               0,
@@ -515,6 +539,7 @@ static GRADING_T G_grading[] =
               "  or i.isunique=1) y"
               " on y.tabid=t.id"
               " where y.tabid is null"
+              " and t.name not like '{%'"
               " order by 1",
               NULL,
               SUB_EACH,
@@ -530,7 +555,8 @@ static GRADING_T G_grading[] =
               "select round(100.0*sum(case comment_len when 0"
               " then 0 else 1 end)/count(*)) ptc_commented"
               " from tabTable"
-              " where varid=?1",
+              " where varid=?1"
+              " and name not like '{%'",
               SUB_ONCE | AT_LEAST,
               50,
               5.0,
@@ -552,6 +578,7 @@ static GRADING_T G_grading[] =
               " having count(*)>2) x"
               " join tabTable t"
               " on t.id=x.tabid"
+              " where t.name not like '{%'"
               " order by 1",
               "select count(*)"
               " from (select ut.tabid,count(*) as legs"
@@ -566,7 +593,8 @@ static GRADING_T G_grading[] =
               " having count(*)>2) x"
               " join tabTable t"
               " on t.id=x.tabid"
-              " where t.varid=?1",
+              " where t.varid=?1"
+              " and t.name not like '{%'",
               SUB_EACH,
               0,
               2.5,
@@ -582,7 +610,8 @@ static GRADING_T G_grading[] =
               " from tabColumn c"
               " join tabTable t"
               " on t.id=c.tabid"
-              " where t.varid=?1",
+              " where t.varid=?1"
+              " and t.name not like '{%'",
               SUB_ONCE | AT_LEAST,
               10,
               5.0,
@@ -627,6 +656,7 @@ static GRADING_T G_grading[] =
               " from tabTable t"
               " join tabColumn c"
               " on c.tabid=t.id"
+              " where t.name not like '{%'"
               " group by t.name"
               " having count(c.id)>(select 3*sum(cols)/count(tabid)"
               "  from (select tabid,count(*) as cols"
@@ -639,6 +669,7 @@ static GRADING_T G_grading[] =
               " join tabColumn c"
               " on c.tabid=t.id"
               " where t.varid=?1"
+              " and t.name not like '{%'"
               " group by t.name"
               " having count(c.id)>(select 3*sum(cols)/count(tabid)"
               "  from (select c.tabid,count(*) as cols"
@@ -662,7 +693,8 @@ static GRADING_T G_grading[] =
               " from tabTable t"
               " left outer join tabForeignKey fk"
               " on fk.reftabid=t.id"
-              " where fk.id is null) ut" // Unreferenced tables
+              " where fk.id is null"
+              " and t.name not like '{%') ut" // Unreferenced tables
               " join tabColumn c"
               " on c.tabid=ut.tabid"
               " and c.autoinc=1"
@@ -673,7 +705,8 @@ static GRADING_T G_grading[] =
               " left outer join tabForeignKey fk"
               " on fk.reftabid=t.id"
               " where fk.id is null"
-              "  and t.varid=?1) ut" // Unreferenced tables
+              "  and t.varid=?1"
+              "  and t.name not like '{%') ut" // Unreferenced tables
               " join tabColumn c"
               " on c.tabid=ut.tabid"
               " and c.autoinc=1"
@@ -748,9 +781,10 @@ static short read_rules(int gcode, char *str, short *prule,
                          q,
                          linenum);
                      ret = -1;
-                   } else {
                      *pcap = (short)999;
                    }
+                 } else {
+                   *pcap = (short)999;
                  }
                }
              }

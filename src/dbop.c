@@ -36,6 +36,45 @@ extern void sql_sqrt(sqlite3_context  *context,
                      int               argc,
                      sqlite3_value   **argv);
 
+// For debugging
+static void dump_table(TABTABLE_T *t) {
+    if (t) {
+      fprintf(stderr, "varid       = %hd\n", t->varid);
+      fprintf(stderr, "id          = %s\n", t->id);
+      fprintf(stderr, "name        = %s\n", t->name);
+      fprintf(stderr, "last_change = %s\n", t->last_change);
+      fprintf(stderr, "comment_len = %hd\n", t->comment_len);
+    }
+}
+
+static void dump_tabcolumn(TABCOLUMN_T *tc) {
+    if (tc) {
+      fprintf(stderr, "varid       = %hd\n", tc->varid);
+      fprintf(stderr, "id          = %s\n", tc->id);
+      fprintf(stderr, "tabid       = %s\n", tc->tabid);
+      fprintf(stderr, "name        = %s\n", tc->name);
+      fprintf(stderr, "comment_len = %hd\n", tc->comment_len);
+      fprintf(stderr, "datatype    = %s\n", tc->datatype);
+      fprintf(stderr, "autoinc     = %hd\n", tc->autoinc);
+      fprintf(stderr, "defaultvalue= %s\n", tc->defaultvalue);
+      fprintf(stderr, "isnotnull   = %hd\n", tc->isnotnull);
+      fprintf(stderr, "collength   = %hd\n", tc->collength);
+      fprintf(stderr, "precision   = %hd\n", tc->precision);
+      fprintf(stderr, "scale       = %hd\n", tc->scale);
+    }
+}
+
+static void dump_tabindex(TABINDEX_T *i) {
+    if (i) {
+      fprintf(stderr, "varid       = %hd\n", i->varid);
+      fprintf(stderr, "id          = %s\n", i->id);
+      fprintf(stderr, "tabid       = %s\n", i->tabid);
+      fprintf(stderr, "name        = %s\n", i->name);
+      fprintf(stderr, "isprimary   = %hd\n", i->isprimary);
+      fprintf(stderr, "isunique    = %hd\n", i->isunique);
+    }
+}
+
 static RELATIONSHIP_T *new_relationship(char *t1, char *c, char *t2) {
     RELATIONSHIP_T *r = NULL;
 
@@ -781,6 +820,61 @@ static TABTABLE_T *index_table(TABINDEX_T *i) {
 }
 */
 
+static int update_index2(TABINDEX_T *i) {
+    sqlite3_stmt *stmt;
+    char         *ztail = NULL;
+    int           ret = -1;
+    int           fail = 0;
+
+    if (i && G_db) {
+      ret = 0;
+      if (debugging()) {
+        fprintf(stderr, ">> update_index2(%s[%s]) table %s unique: %hd\n",
+                        i->id, i->name, i->tabid, i->isunique);
+      }
+      _must_succeed("update index",
+                    sqlite3_prepare_v2(G_db,
+                           "update tabIndex"
+                           " set isPrimary=max(cast(?1 as char),isPrimary),"
+                           "   isUnique=max(cast(?2 as char),isUnique)"
+                           " where tabid=(select id from tabTable"
+                           "     where varid=?3"
+                           "       and mwb_id=ltrim(rtrim(?4,'}'),'{'))"
+                           " and name=lower(?5)",
+                                -1, 
+                                &stmt,
+                                (const char **)&ztail));
+      if ((sqlite3_bind_int(stmt, 1, (int)(i->isprimary)) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 2, (int)(i->isunique)) != SQLITE_OK)
+          || (sqlite3_bind_int(stmt, 3, (int)i->varid) != SQLITE_OK)
+          || (sqlite3_bind_text(stmt, 4,
+                                (const char*)i->tabid, -1,
+                                SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_bind_text(stmt, 5, (const char*)i->name, -1,
+                             SQLITE_STATIC) != SQLITE_OK)
+          || (sqlite3_step(stmt) != SQLITE_DONE)) {
+        fail = 1;
+      }
+      if (fail) {
+        if (debugging()) {
+          dump_tabindex(i);
+        }
+        fprintf(stderr, "Failure updating index (2)\n");
+        fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                        sqlite3_errmsg(G_db),
+                        sqlite3_errcode(G_db),
+                        sqlite3_extended_errcode(G_db));
+        ret = -1;
+      }
+      sqlite3_finalize(stmt);
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< update_index2 - %s\n",
+                      (ret != -1 ? "SUCCESS":"FAILURE"));
+    }
+    return ret;
+}
+
 static int update_index(TABINDEX_T *i) {
     sqlite3_stmt *stmt;
     char         *ztail = NULL;
@@ -819,9 +913,17 @@ static int update_index(TABINDEX_T *i) {
                                 (const char*)i->id, -1,
                                 SQLITE_STATIC) != SQLITE_OK)
           || (sqlite3_step(stmt) != SQLITE_DONE)) {
-        fail = 1;
+        if ((sqlite3_errcode(G_db) == SQLITE_CONSTRAINT)
+            && (sqlite3_extended_errcode(G_db) == SQLITE_CONSTRAINT_UNIQUE)) {
+          fail = (update_index2(i) == -1);
+        } else {
+          fail = 1;
+        }
       }
       if (fail) {
+        if (debugging()) {
+          dump_tabindex(i);
+        }
         fprintf(stderr, "Failure updating index\n");
         fprintf(stderr, "%s (err code: %d, extended: %d\n",
                         sqlite3_errmsg(G_db),
@@ -1399,7 +1501,7 @@ extern int db_runcheck(short check_code, char report, char *query, int varid) {
          || (strncmp(grad_keyword(check_code), "number_", 7) == 0)) {
         num = 1;
       }
-      _must_succeed("run check",
+      _must_succeed(grad_keyword(check_code),
                     sqlite3_prepare_v2(G_db,
                                        query,
                                        -1, 
