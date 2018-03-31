@@ -1079,7 +1079,7 @@ extern int insert_indexcol(TABINDEXCOL_T *ic) {
       }
       _must_succeed("insert indexcol",
                     sqlite3_prepare_v2(G_db,
-                                "insert into tabIndexCol(idxid,colid,seq)"
+                       "insert or ignore into tabIndexCol(idxid,colid,seq)"
                                 " select i.id,c.id,?3"
                                 " from tabIndex i"
                                 " join tabColumn c"
