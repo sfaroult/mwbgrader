@@ -9,6 +9,8 @@
 
 #include "kwsearch.h"
 
+//#define DEBUG
+
 extern int kw_search(int kwc, char *kwv[], char *w, char * label) {
   int   start = 0;
   int   end = kwc - 1;

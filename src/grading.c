@@ -1182,7 +1182,7 @@ extern void set_model_weight(short val) {
    }
 }
 
-extern int grade(char report, short refvar, float max_grade) {
+extern int grade(char report, short refvar, float max_grade, char all_tables) {
     short       i = G_chain_start;
     short       rule;
     float       prev_grade = 0;
@@ -1213,6 +1213,9 @@ extern int grade(char report, short refvar, float max_grade) {
       }
     } else {
       work_grade = max_grade;
+    }
+    if (!all_tables) {
+      only_figures();
     }
     (void)memset(&overview, 0, sizeof(OVERVIEW_T));
     if (refvar <= 0) {

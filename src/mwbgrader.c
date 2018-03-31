@@ -17,7 +17,7 @@
 #include "grading.h"
 #include "debug.h"
 
-#define OPTIONS        "gc:drm:w:"
+#define OPTIONS        "gc:drm:w:a"
 #define GRADING_FILE   "grading.conf"
 #define MAX_VARIANTS   50
 
@@ -26,6 +26,12 @@ static char G_report = 0;
 static void usage(char *prog) {
     fprintf(stderr, "Usage: %s [flags] <.mwb file> [ ... ]\n", prog);
     fprintf(stderr, "  Flags:\n");
+    fprintf(stderr,
+            " -a             : Consider ALL tables in the submitted file.\n");
+    fprintf(stderr,
+            "                  By default, only tables that appear in the\n");
+    fprintf(stderr,
+            "                  diagram are taken into account.\n");
     fprintf(stderr,
             " -g             : show applied grading (can be used to\n");
     fprintf(stderr,
@@ -37,13 +43,13 @@ static void usage(char *prog) {
     fprintf(stderr,
             " -m <model[:g]> : reference model provided by the instructor,\n");
     fprintf(stderr,
-            "                  optionally followed by the maximum grade (100\n");
+    "                  optionally followed by the maximum grade (100\n");
     fprintf(stderr,
-            "                  by default) if the student submission matches\n");
+    "                  by default) if the student submission matches\n");
     fprintf(stderr,
-            "                  this model. Option -m can be repeated, or a comma\n");
+    "                  this model. Option -m can be repeated, or a comma\n");
     fprintf(stderr,
-            "                  separated list of models can follow it to allow\n");
+    "                  separated list of models can follow it to allow\n");
     fprintf(stderr,
             "                  for several variants.\n");
     fprintf(stderr,
@@ -53,6 +59,7 @@ static void usage(char *prog) {
     fprintf(stderr,
             "                  the final grade (default: %d%%).\n",
             MODEL_WEIGHT);
+    fprintf(stderr, "\n");
 }
 
 int main(int argc, char **argv) {
@@ -76,10 +83,14 @@ int main(int argc, char **argv) {
     char            reference = 0;
     short           variant_arr[MAX_VARIANTS];
     short           variant_cnt = 0;
+    char            all_tables = 0;
     
     refmodel[0] = '\0';
     while ((ch = getopt(argc, argv, OPTIONS)) != -1) {
        switch (ch) {
+          case 'a':
+               all_tables = 1; 
+               break;
           case 'd':
                debug_on(); 
                break;
@@ -235,7 +246,7 @@ int main(int argc, char **argv) {
             // the submission
             varid =  best_variant(&base_grade, &dpct, &tpct);
           }
-          mwbgrade = grade(G_report, varid, (float)base_grade);
+          mwbgrade = grade(G_report, varid, (float)base_grade, all_tables);
           if (mwbgrade >= 0) {
             if (G_report) {
               printf("grade = %d\n", mwbgrade);

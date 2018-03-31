@@ -23,6 +23,13 @@ static char     G_ref = 0; // Just to know which database is the main one
                                             sqlite3_errstr(ret_code)); \
                                     return 1;}} 
 
+#define _must_succeed_void(what, f)   {int ret_code; \
+                                  if ((ret_code = f) != SQLITE_OK) { \
+                                    fprintf(stderr, "%s: %s\n", \
+                                            what, \
+                                            sqlite3_errstr(ret_code)); \
+                                    return;}} 
+
 #define _check_code(x, expected)   {if (x != expected) { \
                                       fprintf(stderr, "%s\n", \
                                               sqlite3_errstr(x)); \
@@ -187,6 +194,7 @@ static char *G_ddl[] =
              "    refid       int,"  // Matching table in the reference
              "    mwb_id      varchar(50) not null unique,"
              "    name        varchar(64) not null,"
+             "    figure      char not null default 'N',"
              "    last_change date,"
              "    comment_len int default 0,"
              "    constraint tabTable_u1"
@@ -513,6 +521,66 @@ static int update_table(TABTABLE_T *t) {
                       (ret == 0 ? "SUCCESS":"FAILURE"));
     }
     return ret;
+}
+
+extern void table_figure(char *mwbid) {
+    sqlite3_stmt *stmt = NULL;
+    char         *ztail = NULL;
+
+    if (mwbid) {
+      if (debugging()) {
+        fprintf(stderr, ">> table_figure(%s)\n", mwbid);
+      }
+      _must_succeed_void("table figure",
+               sqlite3_prepare_v2(G_db,
+                            "update tabTable"
+                            " set figure='Y'"
+                            " where mwb_id=ltrim(rtrim(?1,'}'),'{')",
+                            -1, 
+                            &stmt,
+                            (const char **)&ztail));
+      if ((sqlite3_bind_text(stmt, 1,
+                            (const char*)mwbid, -1,
+                            SQLITE_STATIC) != SQLITE_OK)
+           || (sqlite3_step(stmt) != SQLITE_DONE)) {
+        fprintf(stderr, "Failure recording figure for %s\n", mwbid);
+        fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                        sqlite3_errmsg(G_db),
+                        sqlite3_errcode(G_db),
+                        sqlite3_extended_errcode(G_db));
+      }
+      sqlite3_finalize(stmt);
+    }
+    if (debugging()) {
+      fprintf(stderr, "<< table_figure\n");
+    }
+}
+
+extern void only_figures(void) {
+    sqlite3_stmt *stmt = NULL;
+    char         *ztail = NULL;
+
+    if (debugging()) {
+      fprintf(stderr, ">> only_figures()\n");
+    }
+    _must_succeed_void("table figure",
+             sqlite3_prepare_v2(G_db,
+                          "delete from tabTable"
+                          " where figure='N'",
+                          -1, 
+                          &stmt,
+                          (const char **)&ztail));
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+      fprintf(stderr, "Failure removing figure-less tables\n");
+      fprintf(stderr, "%s (err code: %d, extended: %d\n",
+                      sqlite3_errmsg(G_db),
+                      sqlite3_errcode(G_db),
+                      sqlite3_extended_errcode(G_db));
+    }
+    sqlite3_finalize(stmt);
+    if (debugging()) {
+      fprintf(stderr, "<< only_figures\n");
+    }
 }
 
 extern int insert_table(TABTABLE_T *t) {

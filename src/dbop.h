@@ -25,6 +25,9 @@ extern int   insert_index(TABINDEX_T *i);
 extern int   insert_indexcol(TABINDEXCOL_T *ic);
 extern int   insert_foreignkey(TABFOREIGNKEY_T *fk, COLFOREIGNKEY_T *cols);
 
+extern void  table_figure(char *mwbid);
+extern void  only_figures(void);
+
 extern int   db_begin_tx(void);
 extern int   db_commit(void);
 extern int   db_rollback(void);

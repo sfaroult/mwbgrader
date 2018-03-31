@@ -27,13 +27,15 @@
 #define MAXLEVELS      100
 #define SYNTH_ID_LEN   500
 
-#define STATUS_CNT   5
+#define STATUS_CNT   7
+#define STATUS_UNK  -1
 #define STATUS_COL   0
-#define STATUS_FK    1
-#define STATUS_IDX   2
-#define STATUS_ICO   3
-#define STATUS_TAB   4
-#define STATUS_UNK  99
+#define STATUS_DIAG  1
+#define STATUS_FK    2
+#define STATUS_IDX   3
+#define STATUS_ICO   4
+#define STATUS_TAB   5
+#define STATUS_TABF  6
 
 #define _short(s)   (s?(strrchr(s,'.') == NULL ?s:1+strrchr(s,'.')):"null")
 
@@ -55,12 +57,14 @@ static STATUS_T  G_status[MAXLEVELS];
 static short     G_lvl = 0;
 
 // content-struct-name (for type = list) and struct-name
-// For struct-name there is an id
+// For struct-name there is an id, except for links
 static char     *G_category[STATUS_CNT] = {"Column",
+                                           "Diagram",
                                            "ForeignKey",
                                            "Index",
                                            "IndexColumn",
-                                           "Table"};
+                                           "Table",
+                                           "TableFigure"};
 
 /* Structures holding current values */
 static TABTABLE_T      G_tab;
@@ -82,6 +86,28 @@ static void show_tag(char exiting, char *tag) {
            tag);
       }
    }
+}
+
+static void show_status(void) {
+   fprintf(stderr, "---\nG_lvl = %d\n", G_lvl);
+#ifdef SETUP
+   fprintf(stderr, "catpath = [%s]\n", G_status[G_lvl].catpath);
+#else
+   fprintf(stderr, "catpath = %hd (%s)\n",
+                   G_status[G_lvl].catpath,
+                   catpath_keyword(G_status[G_lvl].catpath));
+#endif
+   fprintf(stderr, "cat = %hd (%s)\n",
+                   G_status[G_lvl].cat,
+                   (G_status[G_lvl].cat >= 0 ?
+                   G_category[G_status[G_lvl].cat] : "None"));
+#ifdef SETUP
+   fprintf(stderr, "key = %d\n", G_status[G_lvl].key);
+#else
+   fprintf(stderr, "key = %d (%s)\n", G_status[G_lvl].key,
+                    synth_keyword(G_status[G_lvl].key));
+#endif
+   fprintf(stderr, "obj = %d\n---\n", (int)G_status[G_lvl].obj);
 }
 
 static void init_struct(short variant) {
@@ -158,6 +184,7 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
           int      i;
           int      cat;
           char     catpath[SYNTH_ID_LEN];
+          int      figure;
 #ifdef SETUP
           FILE    *fpkey;
           FILE    *fpsynth;
@@ -169,6 +196,10 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
 #endif
 
     if (xmlTextReaderHasAttributes(reader)) {
+      if (G_debug) {
+        fprintf(stderr, "Start:\n");
+        show_status();
+      }
 #ifdef SETUP
       fpkey = fopen("mwbkey.txt", "a");
       assert(fpkey);
@@ -177,6 +208,7 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
       fpcatpath = fopen("catpath.txt", "a");
       assert(fpcatpath);
 #endif
+      figure = 0;
       if (G_lvl) {
         // A priori, same category as the previous level
         G_status[G_lvl].cat = G_status[G_lvl-1].cat;
@@ -187,14 +219,24 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
         G_status[G_lvl].catpath = G_status[G_lvl-1].catpath;
 #endif
         if (strcasecmp(tag, "link") == 0) {
-          int lvl = G_lvl;
+          int      lvl = G_lvl;
 
+          if (G_debug) {
+#ifdef SETUP
+            fprintf(stderr, "link - catpath = %s\n", G_status[G_lvl].catpath);
+#else
+            fprintf(stderr, "link - catpath = %s (%d)\n",
+                            catpath_keyword(G_status[G_lvl].catpath),
+                            G_status[G_lvl].catpath);
+#endif
+          }
           do {
             lvl--;
           } while ((lvl >= 0) && (G_status[lvl].key < 0));
           if (lvl >= 0) {
             G_status[G_lvl].key = G_status[lvl].key;
           }
+          figure++;
         } else {
 #ifdef SETUP
           G_status[G_lvl].key = -1;
@@ -214,6 +256,15 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
       }
       G_status[G_lvl].obj = 0;
       // Now loop on attributes
+      if (G_debug) {
+#ifdef SETUP
+        fprintf(stderr, "attr loop - catpath = %s\n", G_status[G_lvl].catpath);
+#else
+        fprintf(stderr, "attr loop - catpath = %s (%d)\n",
+                        catpath_keyword(G_status[G_lvl].catpath),
+                        G_status[G_lvl].catpath);
+#endif
+      }
       while (xmlTextReaderMoveToNextAttribute(reader)) {
         n = xmlTextReaderConstName(reader);
         v = xmlTextReaderConstValue(reader);
@@ -223,43 +274,79 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
         // the category and key code)
         if (strcmp((char *)n, "type") == 0) {
           if (strcmp((char *)v, "object") == 0) {
+            if (G_debug) {
+              fprintf(stderr, "type: object\n");
+            }
             G_status[G_lvl].obj = 1;
           }
         } else if (strcmp((char *)n, "struct-name") == 0) {
           // Possibly a new category
+          if (G_debug) {
+            fprintf(stderr, "struct-name\n");
+          }
           i = 0;
           while ((i < STATUS_CNT)
-                 && strcmp(_short((char *)v), G_category[i])) {
+               && strcmp(_short((char *)v), G_category[i])) {
             i++;
           }
           if ((i < STATUS_CNT)
               && (i != G_status[G_lvl].cat)) { // New category
+            if (G_debug) {
+              fprintf(stderr, "NEW CATEGORY: %s\n", G_category[i]);
+            }
             catpath[0] = '\0';
-            if (G_status[G_lvl].cat != STATUS_UNK) {
+            if ((G_status[G_lvl].cat != STATUS_UNK)
+#ifdef SETUP
+              ) {
+#else
+                && (G_status[G_lvl].catpath != CATPATH_NOT_FOUND)) {
+#endif
 #ifdef SETUP
               strncpy(catpath, G_status[G_lvl].catpath, SYNTH_ID_LEN);
 #else
+              if (G_debug) {
+                fprintf(stderr, "\ncatpath id: %d\n",
+                         (int)G_status[G_lvl].catpath);
+                fprintf(stderr, "=> %s\n",
+                        catpath_keyword(G_status[G_lvl].catpath));
+              }
               strncpy(catpath, catpath_keyword(G_status[G_lvl].catpath),
                         SYNTH_ID_LEN);
 #endif
-              strncat(catpath, "|", SYNTH_ID_LEN - 1 - strlen(catpath));
+              strncat(catpath, "_", SYNTH_ID_LEN - 1 - strlen(catpath));
             }
             strncat(catpath, G_category[i],
                     SYNTH_ID_LEN - strlen(catpath) - strlen(G_category[i]));
+            if (G_debug) {
+              fprintf(stderr, "Setting cat to %d\n", i);
+            }
             G_status[G_lvl].cat = i;
 #ifdef SETUP
             strncpy(G_status[G_lvl].catpath, catpath, SYNTH_ID_LEN);
 #else
+            if (G_debug) {
+              fprintf(stderr, "\ncatpath: %s\n", catpath);
+            }
             G_status[G_lvl].catpath = (short)catpath_search(catpath);
+            if (G_debug) {
+              fprintf(stderr, "\ncode found: %d\n", G_status[G_lvl].catpath);
+            }
 #endif
           } else {
             // Not an object for us to consider
+            if (G_debug) {
+              fprintf(stderr, "Ignored object\n");
+            }
             G_status[G_lvl].obj = 0;
           }
         } else if (G_status[G_lvl].obj && (strcmp((char *)n, "id") == 0)) {
           if (G_debug) {
+            fprintf(stderr, "id\n");
+          }
+          if (G_debug) {
             fprintf(stderr, "\nstatus = %s\n",
                     G_category[G_status[G_lvl].cat]);
+            fprintf(stderr, "v = %s\n", (char *)v);
           }
           switch (G_status[G_lvl].cat) {
             case STATUS_COL:
@@ -295,13 +382,24 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
           }
         } else if ((strcmp((char *)n, "key") == 0)
                    && (G_status[G_lvl].cat != STATUS_UNK)) {
+          if (G_debug) {
+            fprintf(stderr, "key\n");
+          }
+#ifndef SETUP
+          if (G_debug) {
+            fprintf(stderr, "\nKEY - cat=%d, catpath=%d (%s)\n",
+                            G_status[G_lvl].cat,
+                            G_status[G_lvl].catpath,
+                            catpath_keyword(G_status[G_lvl].catpath));
+          }
+#endif
           cat = G_status[G_lvl].cat;
 #ifdef SETUP
           p = G_status[G_lvl].catpath;
           while (*p) {
             fputc(toupper(*p++), fpsynth);
           }
-          fputc('|', fpsynth);
+          fputc('_', fpsynth);
           p = (char *)v;
           while (*p) {
             fputc(toupper(*p++), fpsynth);
@@ -329,21 +427,32 @@ static int checkAttr(xmlTextReaderPtr reader, char *tag) {
                  //}
                  break;
             default:
-                 snprintf(synth_id, SYNTH_ID_LEN,
-                          "%s|%s",
-                          catpath_keyword(G_status[G_lvl].catpath),
-                          (char *)v);
-                 //if (G_debug) {
-                 //  fprintf(stderr, " - %s ", synth_id);
-                 //}
-                 G_status[G_lvl].key = synth_search(synth_id);
-                 //if (G_debug) {
-                 //  fprintf(stderr, "(%d)\n", G_status[G_lvl].key);
-                 //}
+                 if (G_status[G_lvl].catpath != CATPATH_NOT_FOUND) {
+                   snprintf(synth_id, SYNTH_ID_LEN,
+                            "%s_%s",
+                            catpath_keyword(G_status[G_lvl].catpath),
+                            (char *)v);
+                   if (G_debug) {
+                     fprintf(stderr, " - %s ", synth_id);
+                   }
+                   G_status[G_lvl].key = synth_search(synth_id);
+                   if (G_debug) {
+                     fprintf(stderr, "(%d)\n", G_status[G_lvl].key);
+                   }
+                 }
                  break;
           }
 #endif
+        } else {
+          if (G_debug) {
+            fprintf(stderr, "Fell through (attr=%s):\n", (char *)n);
+            show_status();
+          }
         }
+      }
+      if (G_debug) {
+        fprintf(stderr, "End:\n");
+        show_status();
       }
       // Move the reader back to the element node.
       xmlTextReaderMoveToElement(reader);
@@ -375,6 +484,9 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
         // if (G_debug) {
         //   fprintf(stderr, "Calling xmlTextReaderRead()\n");
         // }
+#ifdef SETUP
+        fprintf(stderr, "-- XML SETUP\n");
+#endif
         ret = xmlTextReaderRead(reader);
         // if (G_debug) {
         //   fprintf(stderr, "starting loop\n");
@@ -397,13 +509,13 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
                      //   fprintf(stderr, "Calling checkAttr()\n");
                      // }
                      getCatKey = checkAttr(reader, name);
+#ifndef SETUP
                      if (G_debug) {
                        if (synth_keyword(getCatKey)) {
                          fprintf(stderr, "checkAttr() returns %s\n",
                                  synth_keyword(getCatKey));
                        }
                      }
-#ifndef SETUP
                      if (G_status[G_lvl].catpath != prevCatPath) {
                        // if (G_debug) {
                        //   fprintf(stderr, "New catpath %s\n",
@@ -638,6 +750,11 @@ static int streamXML(xmlTextReaderPtr reader, short variant) {
                             break;
                        case SYNTH_TABLE_FOREIGNKEY_TABLE_REFERENCEDTABLE:
                             strncpy(G_fk.reftabid, v, ID_LEN);
+                            break;
+                       case SYNTH_DIAGRAM_TABLEFIGURE_TABLE_TABLE:
+                            if (v) {
+                              table_figure(v);
+                            }
                             break;
                        default:
                             break;
